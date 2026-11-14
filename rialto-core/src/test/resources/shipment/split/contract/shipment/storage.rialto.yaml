@@ -1,0 +1,169 @@
+rialto: '1.0.0'
+storage:
+  Shipment:
+    table: db#shipment
+    storageKey: storage_id
+    columns:
+      id: public_id
+      note: delivery_note
+      expectedDelivery: expected_delivery
+      destination.street: destination_street
+      destination.city: destination_city
+      state: state
+      warehouse:
+        join: warehouse_id
+        table: db#warehouse
+        key: public_id
+      priority: priority
+      recipient: recipient
+      createdAt: created_at
+      approvedBy: approved_by
+      approvedAt: approved_at
+      rejectionReason: rejection_reason
+      label: label
+      serviceCodes: service_codes
+      handlingUnit:
+        join: handling_unit_id
+        table: db#handling_unit
+        key: id
+    version: version
+    children:
+      lines:
+        parentKey: shipment_id
+        reconcile: identity
+        onDelete: cascade
+        nullAs: empty
+        order: position
+      packages:
+        parentKey: shipment_id
+        reconcile: replaceAll
+        onDelete: cascade
+        order: position
+      customsDeclaration:
+        ownerKey: customs_declaration_id
+        onDelete: restrict
+    delete: physical
+    generated:
+      createdAt: storage
+    computed:
+      lineCount:
+        count: lines
+    scope:
+    - column: tenant_id
+      source: tenant
+    retry:
+      attempts: 3
+      idempotent: true
+    links:
+      tags:
+        table: db#shipment_tag
+        ownerKey: shipment_id
+        targetKey: tag_id
+        onDelete: cascade
+        orderBy:
+        - name asc
+      scans:
+        ownerKey: shipment_id
+        orderBy:
+        - scannedAt asc
+  ShipmentSummary:
+    table: db#shipment
+    columns:
+      id: public_id
+      state: state
+      note: delivery_note
+      expectedDelivery: expected_delivery
+      createdAt: created_at
+    scope:
+    - column: tenant_id
+      source: tenant
+  ShipmentLine:
+    table: db#shipment_line
+    columns:
+      id: public_id
+      quantity: quantity
+  Warehouse:
+    table: db#warehouse
+    columns:
+      id: public_id
+      name: name
+    storageKey: storage_id
+  Tag:
+    table: db#tag
+    columns:
+      id: id
+      name: name
+  TrackingScan:
+    table: db#tracking_scan
+    columns:
+      id: id
+      scannedAt: scanned_at
+  ShipmentPackage:
+    table: db#shipment_package
+    columns:
+      id: id
+      weightKg: weight_kg
+  CustomsDeclaration:
+    table: db#customs_declaration
+    columns:
+      id: id
+      contents: contents
+  Carrier:
+    table: db#carrier
+    unique:
+    - - name
+    columns:
+      id: id
+      name: name
+      contactEmail: contact_email
+      deletedAt: deleted_at
+    delete:
+      soft: deleted_at
+      by: deleted_by
+      restore: true
+  CarrierRate:
+    table: db#carrier_rate
+    columns:
+      carrierId: carrier_id
+      zone: zone
+      amount: amount
+  ShipmentCity:
+    table: db#shipment
+    columns:
+      id: public_id
+      city: destination_city
+    scope:
+    - column: tenant_id
+      source: tenant
+  HandlingUnit:
+    table: db#handling_unit
+    union:
+      strategy: single-table
+      discriminator: kind
+  DeliveryProof:
+    table: db#delivery_proof
+    columns:
+      shipment: shipment_id
+    blobs:
+      file:
+        store: proofs
+        key: file_key
+        mediaType: file_media_type
+        size: file_size
+        sha256: file_sha256
+        check: authored
+    scope:
+    - column: tenant_id
+      source: tenant
+  SavedSearch:
+    table: db#saved_search
+    columns:
+      id: id
+      name: name
+      filter: filter
+      owner: owner_id
+    scope:
+    - column: tenant_id
+      source: tenant
+    - column: owner_id
+      source: actor

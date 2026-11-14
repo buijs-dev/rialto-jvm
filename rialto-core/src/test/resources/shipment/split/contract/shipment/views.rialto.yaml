@@ -1,0 +1,92 @@
+rialto: '1.0.0'
+views:
+  ShipmentList:
+    route: /shipments
+    refreshOn:
+    - ShipmentApproved
+    list:
+      operation: listShipments
+      columns:
+      - id
+      - state
+      - note
+      filters:
+        state:
+          field: state
+          operator: in
+        search:
+          field: note
+          operator: ilike
+        delivery:
+          field: expectedDelivery
+          operator: ge
+        created:
+          field: createdAt
+          operator: ge
+      pageSize: 20
+      open: ShipmentDetail
+  ShipmentDetail:
+    route: /shipments/{id}
+    load: getShipment
+    refreshOn:
+    - ShipmentApproved
+    fields:
+      note:
+        edit: patchShipmentNote
+        partial: true
+        hidden: keep
+        component: custom
+      warehouse:
+        edit: patchShipmentContents
+        partial: true
+        link: WarehouseDetail
+        options:
+          operation: suggestWarehouses
+          label: name
+    actions:
+      approve:
+        operation: approveShipment
+        confirm: true
+        pending: block
+      reject:
+        operation: decideShipment
+        confirm: true
+        pending: block
+        values:
+          /decision: reject
+    tabs:
+    - ShipmentLines
+    slots:
+      header:
+        context: Shipment
+        mode: replace
+      actions:
+        context: Shipment
+        mode: append
+      content:
+        context: Shipment
+        mode: replace
+      aside:
+        context: list<ShipmentLine>
+        mode: replace
+  ShipmentProof:
+    route: /shipments/{shipment}/proof
+    submit: uploadDeliveryProof
+    fields:
+      file:
+        label: shipmentProof.fields.file
+  ShipmentLines:
+    route: /shipments/{id}/lines
+    list:
+      operation: getShipmentLines
+      columns:
+      - id
+      - quantity
+      actions:
+        remove:
+          operation: removeShipmentLine
+          confirm: true
+          pending: block
+  WarehouseDetail:
+    route: /warehouses/{id}
+    load: getWarehouse

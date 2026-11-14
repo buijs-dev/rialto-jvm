@@ -1,0 +1,1577 @@
+rialto: '1.0.0'
+info:
+  name: shipment
+  version: 2.0.0
+sources:
+  api:
+    kind: openapi
+    path: openapi.json
+    version: 2.0.0
+    status: current
+  db:
+    kind: sql
+    path: schema.sql
+    dialect: postgresql
+  events:
+    kind: asyncapi
+    path: asyncapi.json
+    version: 1.0.0
+    status: current
+  apiV1:
+    kind: openapi
+    path: openapi-v1.json
+    version: 1.0.0
+    status: deprecated
+    deprecated: '2026-11-01'
+    sunset: '2027-11-01'
+    successor: api
+auth:
+  providers:
+    main:
+      issuer: https://auth.example.invalid/realms/shipment
+  clients:
+    web:
+      provider: main
+      clientId: shipment-web
+      flow: authorizationCode
+      scopes:
+      - openid
+      - profile
+    warehouseSync:
+      provider: main
+      clientId: warehouse-sync
+      flow: clientCredentials
+  claims:
+    subject: sub
+    roles:
+    - realm_access.roles
+    - scope
+    tenant: tenant_id
+    service: service_account
+  scopes:
+    shipments:read:
+      description: Read shipments
+      scheme: api#/components/securitySchemes/oauth
+    shipments:write:
+      description: Edit shipments
+      scheme: api#/components/securitySchemes/oauth
+    shipments:approve:
+      description: Approve shipments
+      scheme: api#/components/securitySchemes/oauth
+  apiKeys:
+    warehouseKey:
+      scheme: api#/components/securitySchemes/warehouseKey
+      lookup: WarehouseKeys
+    warehouseKeyV1:
+      scheme: apiV1#/components/securitySchemes/warehouseKey
+      lookup: WarehouseKeys
+types:
+  ShipmentId:
+    kind: value
+    wraps: uuid
+  WarehouseId:
+    kind: value
+    wraps: uuid
+  Status:
+    kind: enum
+    members:
+    - draft
+    - approved
+    - rejected
+  Address:
+    kind: value
+    invariant: Address.nonBlank
+    properties:
+      street:
+        type: string
+        minLength: 1
+        maxLength: 200
+      city:
+        type: string
+        minLength: 1
+        maxLength: 120
+  ShipmentLine:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      quantity:
+        type: int32
+        minimum: 1
+  Shipment:
+    kind: entity
+    description: A shipment from a warehouse to a destination.
+    aggregateRoot: true
+    transitions:
+      property: state
+      rules:
+        approve:
+          from:
+          - draft
+          to: approved
+          sets:
+            approvedAt: now
+            approvedBy: actor
+          emits:
+          - ShipmentApproved
+        reject:
+          from:
+          - draft
+          to: rejected
+    identity:
+    - id
+    properties:
+      id:
+        type: ShipmentId
+      note:
+        type: string
+        nullable: true
+        maxLength: 280
+        description: Free note for the driver.
+      expectedDelivery:
+        type: date
+        nullable: true
+      destination:
+        type: Address
+      state:
+        type: Status
+        default:
+          value: draft
+          phase: business
+      lines:
+        type: list<ShipmentLine>
+        relation: owned
+        maxItems: 100
+      lineCount:
+        type: int32
+        description: The number of lines, counted in every read.
+      warehouse:
+        type: WarehouseId
+        nullable: true
+        relation: reference
+      recipient:
+        type: Recipient
+        immutable: true
+      priority:
+        type: Priority
+        default:
+          value: standard
+          phase: decode
+      createdAt:
+        type: instant
+      approvedBy:
+        type: string
+        nullable: true
+      approvedAt:
+        type: instant
+        nullable: true
+      rejectionReason:
+        type: string
+        nullable: true
+        maxLength: 280
+      label:
+        type: string
+      tags:
+        type: list<Tag>
+        relation: reference
+      scans:
+        type: list<TrackingScan>
+        relation: reference
+      packages:
+        type: list<ShipmentPackage>
+        relation: owned
+      customsDeclaration:
+        type: CustomsDeclaration
+        nullable: true
+        relation: owned
+      handlingUnit:
+        type: HandlingUnit
+        nullable: true
+        relation: reference
+      serviceCodes:
+        type: set<string>
+  ShipmentApproved:
+    kind: value
+    properties:
+      shipmentId:
+        type: ShipmentId
+      approvedAt:
+        type: instant
+  ShipmentSummary:
+    kind: projection
+    source: Shipment
+    properties:
+    - id
+    - state
+    - note
+    - expectedDelivery
+    - createdAt
+  DeliveryProof:
+    kind: entity
+    identity:
+    - shipment
+    description: Proof that a shipment was delivered, kept outside the row in a blob store.
+    properties:
+      shipment:
+        type: ShipmentId
+      file:
+        type: binary
+        maxSize: 10485760
+        mediaTypes:
+        - image/jpeg
+        - application/pdf
+        description: A photo or a signed PDF of the delivery.
+  Priority:
+    kind: enum
+    members:
+    - standard
+    - express
+    extensible: true
+  PersonRecipient:
+    kind: value
+    properties:
+      name:
+        type: string
+        minLength: 1
+  CompanyRecipient:
+    kind: value
+    properties:
+      companyName:
+        type: string
+        minLength: 1
+      contact:
+        type: string
+  Recipient:
+    kind: union
+    discriminator: kind
+    variants:
+      person: PersonRecipient
+      company: CompanyRecipient
+  Warehouse:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: WarehouseId
+      name:
+        type: string
+        minLength: 1
+        maxLength: 120
+  Tag:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      name:
+        type: string
+  TrackingScan:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      scannedAt:
+        type: instant
+  ShipmentPackage:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      weightKg:
+        type: decimal(8,3)
+        minimum: 0.001
+  CustomsDeclaration:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      contents:
+        type: string
+        minLength: 1
+  Carrier:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      name:
+        type: string
+        minLength: 1
+        maxLength: 120
+      contactEmail:
+        type: string
+        nullable: true
+        format: email
+      deletedAt:
+        type: instant
+        nullable: true
+        description: When the carrier was deleted; only a read that includes deleted carriers shows one.
+  CarrierRate:
+    kind: entity
+    identity:
+    - carrierId
+    - zone
+    properties:
+      carrierId:
+        type: uuid
+      zone:
+        type: string
+      amount:
+        type: decimal(10,2)
+        minimum: 0
+  Pallet:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      capacityKg:
+        type: int32
+        minimum: 1
+  Container:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      seal:
+        type: string
+  HandlingUnit:
+    kind: union
+    discriminator: kind
+    variants:
+      pallet: Pallet
+      container: Container
+  ShipmentCity:
+    kind: projection
+    source: Shipment
+    properties:
+      id: id
+      city: destination.city
+  ShipmentCancelled:
+    kind: value
+    properties:
+      shipmentId:
+        type: ShipmentId
+      cancelledAt:
+        type: instant
+      reason:
+        type: string
+  WarehouseService:
+    kind: value
+    properties:
+      priority:
+        type: Priority
+  SavedSearch:
+    kind: entity
+    description: A shipment list filter that a user saved; only that user sees it, in their tenant.
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      name:
+        type: string
+        minLength: 1
+        maxLength: 80
+      filter:
+        type: string
+        minLength: 1
+        maxLength: 1000
+        description: An RSQL filter for listShipments.
+      owner:
+        type: string
+        description: The user who saved it, from the verified token; shown, never sent.
+shapes:
+  CreateShipment:
+    source: Shipment
+    command: create
+    properties:
+      id:
+        role: application
+        provider: newShipmentId
+      note:
+        role: caller
+        maxLength: 200
+      expectedDelivery:
+        role: caller
+      destination:
+        role: caller
+      warehouse:
+        role: caller
+        as: identity
+      lines:
+        role: caller
+        as: command
+        shape: CreateShipmentLine
+      recipient:
+        role: caller
+      priority:
+        role: caller
+      createdAt:
+        role: storage
+      approvedBy:
+        role: derived
+      label:
+        role: derived
+      tags:
+        role: caller
+        as: identity
+        uniqueItems: true
+      packages:
+        role: caller
+        as: command
+        shape: CreateShipmentPackage
+      customsDeclaration:
+        role: caller
+        as: command
+        shape: CreateCustomsDeclaration
+      handlingUnit:
+        role: caller
+        as: identity
+      serviceCodes:
+        role: caller
+  CreateShipmentLine:
+    source: ShipmentLine
+    command: create
+    properties:
+      id:
+        role: application
+        provider: newLineId
+      quantity:
+        role: caller
+  PatchShipmentNote:
+    source: Shipment
+    command: update
+    strategy: merge-patch
+    properties:
+      note:
+        role: caller
+    partial: true
+  CreateShipmentPackage:
+    source: ShipmentPackage
+    command: create
+    properties:
+      id:
+        role: application
+        provider: newPackageId
+      weightKg:
+        role: caller
+  CreateCustomsDeclaration:
+    source: CustomsDeclaration
+    command: create
+    properties:
+      id:
+        role: application
+        provider: newDeclarationId
+      contents:
+        role: caller
+  DecideShipment:
+    source: Shipment
+    command: update
+    properties:
+      rejectionReason:
+        role: caller
+    strategy: merge-patch
+  ReplaceCarrier:
+    source: Carrier
+    command: update
+    properties:
+      name:
+        role: caller
+      contactEmail:
+        role: caller
+    strategy: replace
+  CountShipments:
+    source: Shipment
+    properties:
+      state:
+        role: caller
+    partial: true
+  PatchShipmentContents:
+    source: Shipment
+    command: update
+    properties:
+      warehouse:
+        role: caller
+        as: identity
+      lines:
+        role: caller
+        as: command
+        shape: ReconcileShipmentLine
+      packages:
+        role: caller
+        as: command
+        shape: CreateShipmentPackage
+      tags:
+        role: caller
+        as: identity
+        uniqueItems: true
+    strategy: merge-patch
+    partial: true
+  ReconcileShipmentLine:
+    source: ShipmentLine
+    command: update
+    strategy: replace
+    properties:
+      id:
+        role: caller
+      quantity:
+        role: caller
+  UploadDeliveryProof:
+    source: DeliveryProof
+    properties:
+      shipment:
+        role: caller
+      file:
+        role: caller
+  DeliveryProofFile:
+    source: DeliveryProof
+    properties:
+      file:
+        role: derived
+  CreateSavedSearch:
+    source: SavedSearch
+    command: create
+    properties:
+      id:
+        role: application
+        provider: newSavedSearchId
+      name:
+        role: caller
+      filter:
+        role: caller
+errors:
+  format: problem-details
+  validationStatus: 400
+  identify: member
+  wire:
+    code: /code
+    fieldErrors: /errors
+    field:
+      location: /pointer
+      code: /code
+      detail: /detail
+    locationFormat: pointer
+  codes:
+    noLines:
+      category: conflict
+      title: Shipment has no lines
+      description: Approval requires at least one shipment line.
+    blank:
+      category: validation
+      title: Must not be blank
+      description: An address component contains only whitespace.
+    shipmentMissing:
+      category: not-found
+      title: Shipment missing
+      description: The requested shipment is not visible in this tenant.
+    approvalDenied:
+      category: authorization
+      title: Approval denied
+      description: The verified user cannot approve this shipment.
+    shipmentQuota:
+      category: too-many-requests
+      title: Shipment quota reached
+      description: The tenant has reached its shipment creation quota.
+    warehouseUnavailable:
+      category: unavailable
+      title: Warehouse unavailable
+      description: The warehouse integration is temporarily unavailable.
+    invalidRecipient:
+      category: validation
+      title: Invalid recipient
+      description: The recipient cannot receive this shipment.
+      status: 422
+  types:
+    validation: https://errors.example.invalid/validation
+    authentication: https://errors.example.invalid/authentication
+    authorization: https://errors.example.invalid/authorization
+    not-found: https://errors.example.invalid/not-found
+    conflict: https://errors.example.invalid/conflict
+    precondition-failed: https://errors.example.invalid/precondition-failed
+    precondition-required: https://errors.example.invalid/precondition-required
+    too-many-requests: https://errors.example.invalid/too-many-requests
+    unavailable: https://errors.example.invalid/unavailable
+    internal: https://errors.example.invalid/internal
+operations:
+  listShipments:
+    rest:
+      apiV1: apiV1#/paths/~1shipments/get
+      api: api#/paths/~1shipments/get
+    output: ShipmentSummary
+    list:
+      fields:
+        id:
+          sort: true
+        state:
+          filter:
+          - eq
+          - ne
+          - in
+          - out
+          sort: true
+        note:
+          filter:
+          - eq
+          - ne
+          - like
+          - ilike
+        expectedDelivery:
+          filter:
+          - eq
+          - ge
+          - lt
+        createdAt:
+          filter:
+          - ge
+          - lt
+      filter:
+        encoding: rsql
+        maxLength: 1000
+        maxDepth: 4
+      sort:
+        encoding: colon
+        default:
+        - field: state
+          direction: asc
+        tiebreaker: id
+      pagination:
+        strategy: cursor
+        limit:
+          default: 20
+          max: 100
+      count:
+        strategy: operation
+        operation: countShipments
+        response: /count
+      wire:
+        parameters:
+          filter: filter
+          sort: sort
+          limit: limit
+          cursor: cursor
+        response:
+          items: /items
+          next: /nextCursor
+          previous: /prevCursor
+  countShipments:
+    rest:
+      apiV1: apiV1#/paths/~1shipments~1count/get
+      api: api#/paths/~1shipments~1count/get
+    input: CountShipments
+    parameters:
+      state: state
+  createShipment:
+    rest:
+      apiV1: apiV1#/paths/~1shipments/post
+      api: api#/paths/~1shipments/post
+    lifecycle: create
+    input: CreateShipment
+    output: Shipment
+    idempotency:
+      header: Idempotency-Key
+    principals:
+    - user
+    - service
+    errors:
+    - blank
+    - invalidRecipient
+  deleteShipment:
+    rest:
+      apiV1: apiV1#/paths/~1shipments~1{shipmentId}/delete
+      api: api#/paths/~1shipments~1{shipmentId}/delete
+    parameters:
+      shipmentId: id
+    lifecycle: delete
+    subject: Shipment
+    from:
+    - draft
+    precondition:
+      token: If-Match
+      version: stored
+    errors:
+    - invalidTransition
+  getShipment:
+    rest:
+      apiV1: apiV1#/paths/~1shipments~1{shipmentId}/get
+      api: api#/paths/~1shipments~1{shipmentId}/get
+    parameters:
+      shipmentId: id
+    output: Shipment
+    conditional:
+      token: If-None-Match
+      version: stored
+    errors:
+    - shipmentMissing
+  patchShipmentNote:
+    rest:
+      apiV1: apiV1#/paths/~1shipments~1{shipmentId}/patch
+      api: api#/paths/~1shipments~1{shipmentId}/patch
+    parameters:
+      shipmentId: id
+    lifecycle: update
+    input: PatchShipmentNote
+    output: Shipment
+    precondition:
+      token: If-Match
+      version: stored
+    handler: authored
+    deprecated:
+      since: '2026-11-05'
+      sunset: '2027-11-01'
+      successor: patchShipmentContents
+  approveShipment:
+    rest:
+      apiV1: apiV1#/paths/~1shipments~1{shipmentId}~1approval/post
+      api: api#/paths/~1shipments~1{shipmentId}~1approval/post
+    parameters:
+      shipmentId: id
+    output: Shipment
+    precondition:
+      token: If-Match
+      version: stored
+    handler: authored
+    description: Approves a draft shipment that has at least one line.
+    transition: Shipment.approve
+    errors:
+    - noLines
+    - approvalDenied
+    - invalidTransition
+    principals:
+    - user
+    policy: canApproveShipment
+  decideShipment:
+    rest: api#/paths/~1shipments~1{shipmentId}~1decision/post
+    parameters:
+      shipmentId: id
+    input: DecideShipment
+    output: Shipment
+    precondition:
+      token: If-Match
+      version: stored
+    handler: authored
+    description: Approves or rejects a draft shipment, as the decision in the body selects.
+    transition:
+      select: /decision
+      rules:
+        approve: Shipment.approve
+        reject: Shipment.reject
+    errors:
+    - noLines
+    - approvalDenied
+    - invalidTransition
+    principals:
+    - user
+    policy: canApproveShipment
+  patchShipmentContents:
+    rest: api#/paths/~1shipments~1{shipmentId}~1contents/patch
+    parameters:
+      shipmentId: id
+    lifecycle: update
+    input: PatchShipmentContents
+    output: Shipment
+    precondition:
+      token: If-Match
+      version: stored
+    idempotency:
+      header: Idempotency-Key
+    handler: authored
+  createShipments:
+    rest: api#/paths/~1shipments~1batch/post
+    lifecycle: create
+    input: CreateShipment
+    output: Shipment
+    batch:
+      atomic: false
+      maxItems: 50
+      wire:
+        items: /items
+        results: /results
+        value: /value
+        problem: /problem
+    errors:
+    - blank
+    - invalidRecipient
+    - warehouseUnavailable
+    - shipmentQuota
+    principals:
+    - service
+  replaceCarrier:
+    rest: api#/paths/~1carriers~1{carrierId}/put
+    parameters:
+      carrierId: id
+    lifecycle: update
+    input: ReplaceCarrier
+    output: Carrier
+    handler: authored
+    principals:
+    - service
+  addShipmentTag:
+    rest: api#/paths/~1shipments~1{shipmentId}~1tags~1{tagId}/put
+    parameters:
+      shipmentId: id
+      tagId: tags.id
+    link:
+      to: Shipment.tags
+      action: add
+  removeShipmentTag:
+    rest: api#/paths/~1shipments~1{shipmentId}~1tags~1{tagId}/delete
+    parameters:
+      shipmentId: id
+      tagId: tags.id
+    link:
+      to: Shipment.tags
+      action: remove
+  getCarrierByName:
+    rest: api#/paths/~1carriers~1by-name~1{name}/get
+    parameters:
+      name: name
+    output: Carrier
+  suggestCarriers:
+    rest: api#/paths/~1carriers~1suggestions/get
+    parameters:
+      q: name
+    output: list<Carrier>
+    maxItems: 10
+    handler: authored
+  deleteCarrier:
+    rest: api#/paths/~1carriers~1{carrierId}/delete
+    parameters:
+      carrierId: id
+    lifecycle: delete
+    subject: Carrier
+    principals:
+    - service
+  getCarrier:
+    rest: api#/paths/~1carriers~1{carrierId}/get
+    parameters:
+      carrierId: id
+    output: Carrier
+    deleted: include
+  restoreCarrier:
+    rest: api#/paths/~1carriers~1{carrierId}~1restoration/post
+    parameters:
+      carrierId: id
+    lifecycle: restore
+    subject: Carrier
+    output: Carrier
+    principals:
+    - service
+  cancelShipment:
+    rest: api#/paths/~1shipments~1{shipmentId}~1cancellation/post
+    parameters:
+      shipmentId: id
+    output: Shipment
+    handler: authored
+    precondition:
+      token: If-Match
+      version: stored
+    emits:
+    - ShipmentCancelled
+    errors:
+    - shipmentMissing
+  localShipmentSearch:
+    output: Shipment
+    list:
+      fields:
+        id:
+          sort: true
+        city:
+          path: destination.city
+          filter:
+          - eq
+          - like
+          - ilike
+        createdAt:
+          filter:
+          - gt
+          - ge
+          - lt
+          - le
+          sort: true
+      filter:
+        maxDepth: 3
+      sort:
+        tiebreaker: id
+      pagination:
+        strategy: cursor
+        limit:
+          default: 20
+          max: 100
+      count:
+        strategy: none
+  listCarriers:
+    rest: api#/paths/~1carriers/get
+    output: Carrier
+    list:
+      fields:
+        id:
+          sort: true
+        name:
+          sort: true
+          filter:
+          - eq
+          - like
+      filter:
+        encoding: rsql
+        maxDepth: 3
+      sort:
+        encoding: jsonapi
+        tiebreaker: id
+      pagination:
+        strategy: offset
+        limit:
+          default: 20
+          max: 100
+      count:
+        strategy: inline
+        response: /total
+      wire:
+        parameters:
+          filter: filter
+          sort: sort
+          limit: limit
+          offset: offset
+        response:
+          items: /items
+          more: /more
+  uploadDeliveryProof:
+    rest:
+      api: api#/paths/~1shipments~1{shipmentId}~1proof/put
+    parameters:
+      shipmentId: shipment
+    input: UploadDeliveryProof
+    handler: authored
+    errors:
+    - shipmentMissing
+  getDeliveryProof:
+    rest:
+      api: api#/paths/~1shipments~1{shipmentId}~1proof/get
+    parameters:
+      shipmentId: shipment
+    output: DeliveryProofFile
+    errors:
+    - shipmentMissing
+  getShipmentScan:
+    rest: api#/paths/~1shipments~1{shipmentId}~1scans~1{scanId}/get
+    subject: Shipment
+    parameters:
+      shipmentId: id
+      scanId: scans.id
+    output: TrackingScan
+  listSavedSearches:
+    rest: api#/paths/~1saved-searches/get
+    output: list<SavedSearch>
+    maxItems: 50
+    principals:
+    - user
+  createSavedSearch:
+    rest: api#/paths/~1saved-searches/post
+    lifecycle: create
+    input: CreateSavedSearch
+    output: SavedSearch
+    principals:
+    - user
+  deleteSavedSearch:
+    rest: api#/paths/~1saved-searches~1{savedSearchId}/delete
+    parameters:
+      savedSearchId: id
+    lifecycle: delete
+    subject: SavedSearch
+    principals:
+    - user
+  getWarehouse:
+    rest: api#/paths/~1warehouses~1{warehouseId}/get
+    parameters:
+      warehouseId: id
+    output: Warehouse
+  suggestWarehouses:
+    rest: api#/paths/~1warehouses~1suggestions/get
+    parameters:
+      q: name
+    output: list<Warehouse>
+    maxItems: 10
+    handler: authored
+  getShipmentLines:
+    rest: api#/paths/~1shipments~1{shipmentId}~1lines/get
+    subject: Shipment
+    parameters:
+      shipmentId: id
+    output: list<ShipmentLine>
+    maxItems: 100
+  removeShipmentLine:
+    rest: api#/paths/~1shipments~1{shipmentId}~1lines~1{lineId}/delete
+    subject: Shipment
+    parameters:
+      shipmentId: id
+      lineId: lines.id
+    handler: authored
+events:
+  ShipmentApproved:
+    type: com.example.shipment.approved.v1
+    source: /shipments
+    subject: shipmentId
+    data: ShipmentApproved
+    channel: events#/channels/shipmentEvents
+    mode: structured
+    description: Emitted when a draft shipment is approved.
+  ShipmentCancelled:
+    type: com.example.shipment.cancelled.v1
+    source: /shipments
+    subject: shipmentId
+    data: ShipmentCancelled
+    channel: events#/channels/shipmentCancellations
+    mode: binary
+    description: Emitted when a shipment is cancelled; cancellation is recorded separately from its approval status.
+streams:
+  shipmentUpdates:
+    events:
+    - ShipmentApproved
+    channel: events#/channels/shipmentUpdates
+    transport: sse
+    replay: PT1H
+  shipmentSocket:
+    events:
+    - ShipmentApproved
+    - ShipmentCancelled
+    channel: events#/channels/shipmentSocket
+    transport: websocket
+    replay: PT1H
+    resume: lastEventId
+subscriptions:
+  notifyWarehouse:
+    event: ShipmentApproved
+    handler: authored
+    ordered: true
+    delivery:
+      attempts: 5
+      deadLetter: events#/channels/shipmentEventsDeadLetter
+  recordCancellation:
+    event: ShipmentCancelled
+    handler: authored
+    idempotent: true
+    delivery:
+      attempts: 3
+      deadLetter: events#/channels/shipmentEventsDeadLetter
+mappings:
+- source: apiV1#/components/schemas/Address
+  target: Address
+  direction: both
+- source: apiV1#/components/schemas/ShipmentLine
+  target: ShipmentLine
+  direction: both
+- source: apiV1#/components/schemas/Shipment
+  target: Shipment
+  direction: both
+  properties:
+    note:
+      from: note
+    label:
+      custom: true
+    serviceCodes:
+      nullAs: empty
+      onDuplicate: keepFirst
+    createdAt:
+      converter:
+        toTarget: parseShipmentInstant
+        toSource: formatShipmentInstant
+        nulls: pass
+        scope: whole
+    priority:
+      custom: true
+    legacyReference:
+      custom: true
+  ignore:
+  - legacyReference
+  - priority
+- source: apiV1#/components/schemas/ShipmentSummary
+  target: ShipmentSummary
+  direction: toSource
+- source: apiV1#/components/schemas/CreateShipmentLine
+  target: CreateShipmentLine
+  direction: toTarget
+- source: apiV1#/components/schemas/CreateShipment
+  target: CreateShipment
+  direction: toTarget
+  ignore:
+  - priority
+  properties:
+    priority:
+      custom: true
+- source: apiV1#/components/schemas/PatchShipmentNote
+  target: PatchShipmentNote
+  direction: toTarget
+- source: apiV1#/components/schemas/Recipient
+  target: Recipient
+  direction: both
+  variants:
+    person: person
+    company: company
+- source: apiV1#/components/schemas/PersonRecipient
+  target: PersonRecipient
+  direction: both
+- source: apiV1#/components/schemas/CompanyRecipient
+  target: CompanyRecipient
+  direction: both
+- source: apiV1#/components/schemas/Carrier
+  target: Carrier
+  direction: both
+- source: apiV1#/components/schemas/ReplaceCarrier
+  target: ReplaceCarrier
+  direction: toTarget
+- source: apiV1#/components/schemas/PatchShipmentContents
+  target: PatchShipmentContents
+  direction: toTarget
+  properties:
+    lines:
+      nullAs: empty
+- source: apiV1#/components/schemas/ReconcileShipmentLine
+  target: ReconcileShipmentLine
+  direction: toTarget
+- source: apiV1#/components/schemas/CreateShipmentPackage
+  target: CreateShipmentPackage
+  direction: toTarget
+- source: apiV1#/components/schemas/ShipmentPackage
+  target: ShipmentPackage
+  direction: both
+- source: apiV1#/components/schemas/CreateCustomsDeclaration
+  target: CreateCustomsDeclaration
+  direction: toTarget
+- source: apiV1#/components/schemas/CustomsDeclaration
+  target: CustomsDeclaration
+  direction: both
+- source: apiV1#/components/schemas/Tag
+  target: Tag
+  direction: both
+- source: apiV1#/components/schemas/TrackingScan
+  target: TrackingScan
+  direction: both
+- source: apiV1#/components/schemas/HandlingUnit
+  target: HandlingUnit
+  direction: both
+- source: apiV1#/components/schemas/Pallet
+  target: Pallet
+  direction: both
+- source: apiV1#/components/schemas/Container
+  target: Container
+  direction: both
+- source: apiV1#/components/schemas/CountShipments
+  target: CountShipments
+  direction: toTarget
+- source: api#/components/schemas/Address
+  target: Address
+  direction: both
+- source: api#/components/schemas/ShipmentLine
+  target: ShipmentLine
+  direction: both
+- source: api#/components/schemas/Shipment
+  target: Shipment
+  direction: both
+  properties:
+    note:
+      from: deliveryNote
+    label:
+      custom: true
+    serviceCodes:
+      nullAs: empty
+      onDuplicate: keepFirst
+    createdAt:
+      converter:
+        toTarget: parseShipmentInstant
+        toSource: formatShipmentInstant
+        nulls: pass
+        scope: whole
+    legacyReference:
+      custom: true
+    priority:
+      converter:
+        toTarget: decodePriority
+        toSource: encodePriority
+        nulls: pass
+        scope: whole
+  ignore:
+  - legacyReference
+- source: api#/components/schemas/ShipmentSummary
+  target: ShipmentSummary
+  direction: toSource
+- source: api#/components/schemas/CreateShipmentLine
+  target: CreateShipmentLine
+  direction: toTarget
+- source: api#/components/schemas/CreateShipment
+  target: CreateShipment
+  direction: toTarget
+  properties:
+    priority:
+      converter:
+        toTarget: decodePriority
+        toSource: encodePriority
+        nulls: pass
+        scope: whole
+- source: api#/components/schemas/PatchShipmentNote
+  target: PatchShipmentNote
+  direction: toTarget
+- source: api#/components/schemas/Recipient
+  target: Recipient
+  direction: both
+  variants:
+    person: person
+    company: company
+- source: api#/components/schemas/PersonRecipient
+  target: PersonRecipient
+  direction: both
+- source: api#/components/schemas/CompanyRecipient
+  target: CompanyRecipient
+  direction: both
+- source: api#/components/schemas/Carrier
+  target: Carrier
+  direction: both
+- source: api#/components/schemas/ReplaceCarrier
+  target: ReplaceCarrier
+  direction: toTarget
+- source: api#/components/schemas/PatchShipmentContents
+  target: PatchShipmentContents
+  direction: toTarget
+  properties:
+    lines:
+      nullAs: empty
+- source: api#/components/schemas/ReconcileShipmentLine
+  target: ReconcileShipmentLine
+  direction: toTarget
+- source: api#/components/schemas/CreateShipmentPackage
+  target: CreateShipmentPackage
+  direction: toTarget
+- source: api#/components/schemas/ShipmentPackage
+  target: ShipmentPackage
+  direction: both
+- source: api#/components/schemas/CreateCustomsDeclaration
+  target: CreateCustomsDeclaration
+  direction: toTarget
+- source: api#/components/schemas/CustomsDeclaration
+  target: CustomsDeclaration
+  direction: both
+- source: api#/components/schemas/Tag
+  target: Tag
+  direction: both
+- source: api#/components/schemas/TrackingScan
+  target: TrackingScan
+  direction: both
+- source: api#/components/schemas/HandlingUnit
+  target: HandlingUnit
+  direction: both
+- source: api#/components/schemas/Pallet
+  target: Pallet
+  direction: both
+- source: api#/components/schemas/Container
+  target: Container
+  direction: both
+- source: api#/components/schemas/DecideShipment
+  target: DecideShipment
+  direction: toTarget
+- source: api#/components/schemas/CountShipments
+  target: CountShipments
+  direction: toTarget
+- source: api#/components/schemas/Warehouse
+  target: Warehouse
+  direction: both
+- source: api#/components/schemas/WarehouseService
+  target: WarehouseService
+  direction: toTarget
+  properties:
+    priority:
+      members:
+        NORMAL: standard
+        RUSH: express
+      fallback: standard
+- source: api#/components/schemas/SavedSearch
+  target: SavedSearch
+  direction: toSource
+- source: api#/components/schemas/CreateSavedSearch
+  target: CreateSavedSearch
+  direction: toTarget
+- source: events#/components/schemas/ShipmentApprovedData
+  target: ShipmentApproved
+  direction: both
+- source: events#/components/schemas/ShipmentCancelledData
+  target: ShipmentCancelled
+  direction: both
+storage:
+  Shipment:
+    table: db#shipment
+    storageKey: storage_id
+    columns:
+      id: public_id
+      note: delivery_note
+      expectedDelivery: expected_delivery
+      destination.street: destination_street
+      destination.city: destination_city
+      state: state
+      warehouse:
+        join: warehouse_id
+        table: db#warehouse
+        key: public_id
+      priority: priority
+      recipient: recipient
+      createdAt: created_at
+      approvedBy: approved_by
+      approvedAt: approved_at
+      rejectionReason: rejection_reason
+      label: label
+      serviceCodes: service_codes
+      handlingUnit:
+        join: handling_unit_id
+        table: db#handling_unit
+        key: id
+    version: version
+    children:
+      lines:
+        parentKey: shipment_id
+        reconcile: identity
+        onDelete: cascade
+        nullAs: empty
+        order: position
+      packages:
+        parentKey: shipment_id
+        reconcile: replaceAll
+        onDelete: cascade
+        order: position
+      customsDeclaration:
+        ownerKey: customs_declaration_id
+        onDelete: restrict
+    delete: physical
+    generated:
+      createdAt: storage
+    computed:
+      lineCount:
+        count: lines
+    scope:
+    - column: tenant_id
+      source: tenant
+    retry:
+      attempts: 3
+      idempotent: true
+    links:
+      tags:
+        table: db#shipment_tag
+        ownerKey: shipment_id
+        targetKey: tag_id
+        onDelete: cascade
+        orderBy:
+        - name asc
+      scans:
+        ownerKey: shipment_id
+        orderBy:
+        - scannedAt asc
+  ShipmentSummary:
+    table: db#shipment
+    columns:
+      id: public_id
+      state: state
+      note: delivery_note
+      expectedDelivery: expected_delivery
+      createdAt: created_at
+    scope:
+    - column: tenant_id
+      source: tenant
+  ShipmentLine:
+    table: db#shipment_line
+    columns:
+      id: public_id
+      quantity: quantity
+  Warehouse:
+    table: db#warehouse
+    columns:
+      id: public_id
+      name: name
+    storageKey: storage_id
+  Tag:
+    table: db#tag
+    columns:
+      id: id
+      name: name
+  TrackingScan:
+    table: db#tracking_scan
+    columns:
+      id: id
+      scannedAt: scanned_at
+  ShipmentPackage:
+    table: db#shipment_package
+    columns:
+      id: id
+      weightKg: weight_kg
+  CustomsDeclaration:
+    table: db#customs_declaration
+    columns:
+      id: id
+      contents: contents
+  Carrier:
+    table: db#carrier
+    unique:
+    - - name
+    columns:
+      id: id
+      name: name
+      contactEmail: contact_email
+      deletedAt: deleted_at
+    delete:
+      soft: deleted_at
+      by: deleted_by
+      restore: true
+  CarrierRate:
+    table: db#carrier_rate
+    columns:
+      carrierId: carrier_id
+      zone: zone
+      amount: amount
+  ShipmentCity:
+    table: db#shipment
+    columns:
+      id: public_id
+      city: destination_city
+    scope:
+    - column: tenant_id
+      source: tenant
+  HandlingUnit:
+    table: db#handling_unit
+    union:
+      strategy: single-table
+      discriminator: kind
+
+  DeliveryProof:
+    table: db#delivery_proof
+    columns:
+      shipment: shipment_id
+    blobs:
+      file:
+        store: proofs
+        key: file_key
+        mediaType: file_media_type
+        size: file_size
+        sha256: file_sha256
+        check: authored
+    scope:
+    - column: tenant_id
+      source: tenant
+  SavedSearch:
+    table: db#saved_search
+    columns:
+      id: id
+      name: name
+      filter: filter
+      owner: owner_id
+    scope:
+    - column: tenant_id
+      source: tenant
+    - column: owner_id
+      source: actor
+views:
+  ShipmentList:
+    route: /shipments
+    refreshOn:
+    - ShipmentApproved
+    list:
+      operation: listShipments
+      columns:
+      - id
+      - state
+      - note
+      filters:
+        state:
+          field: state
+          operator: in
+        search:
+          field: note
+          operator: ilike
+        delivery:
+          field: expectedDelivery
+          operator: ge
+        created:
+          field: createdAt
+          operator: ge
+      pageSize: 20
+      open: ShipmentDetail
+  ShipmentDetail:
+    route: /shipments/{id}
+    load: getShipment
+    refreshOn:
+    - ShipmentApproved
+    fields:
+      note:
+        edit: patchShipmentNote
+        partial: true
+        hidden: keep
+        component: custom
+      warehouse:
+        edit: patchShipmentContents
+        partial: true
+        link: WarehouseDetail
+        options:
+          operation: suggestWarehouses
+          label: name
+    actions:
+      approve:
+        operation: approveShipment
+        confirm: true
+        pending: block
+      reject:
+        operation: decideShipment
+        confirm: true
+        pending: block
+        values:
+          /decision: reject
+    tabs:
+    - ShipmentLines
+    slots:
+      header:
+        context: Shipment
+        mode: replace
+      actions:
+        context: Shipment
+        mode: append
+      content:
+        context: Shipment
+        mode: replace
+      aside:
+        context: list<ShipmentLine>
+        mode: replace
+  ShipmentProof:
+    route: /shipments/{shipment}/proof
+    submit: uploadDeliveryProof
+    fields:
+      file:
+        label: shipmentProof.fields.file
+  ShipmentLines:
+    route: /shipments/{id}/lines
+    list:
+      operation: getShipmentLines
+      columns:
+      - id
+      - quantity
+      actions:
+        remove:
+          operation: removeShipmentLine
+          confirm: true
+          pending: block
+  WarehouseDetail:
+    route: /warehouses/{id}
+    load: getWarehouse
+navigation:
+  home: ShipmentList
+  primary:
+  - view: ShipmentList
+    icon: shipments
+    label: navigation.shipments
+    badge: countShipments
