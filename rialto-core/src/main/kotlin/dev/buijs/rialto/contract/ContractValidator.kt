@@ -42,7 +42,7 @@ object ContractValidator {
     /** The checks over the contract model, in order; each profile adds its own set. */
     internal val checks: List<ContractChecks> =
         listOf(
-            ContractChecks { ReferenceChecks(it).run() },
+            FormatChecks,
         )
 
     private val schema: JsonSchema by lazy {
@@ -108,16 +108,15 @@ object ContractValidator {
 
         if (diagnostics.hasErrors) return ValidationResult(null, diagnostics.all)
 
+        // A contract that is valid against the JSON Schema always fits the model; a failure here is a bug of the tool.
         val contract =
             try {
                 ContractMapper.json.treeToValue<Contract>(document.root)
             } catch (e: Exception) {
-                diagnostics.error(
-                    Code.INTERNAL,
-                    "Cannot build the contract model: ${e.message}",
-                    document.locate(""),
+                throw IllegalStateException(
+                    "Cannot build the contract model of ${document.file}: ${e.message}",
+                    e,
                 )
-                return ValidationResult(null, diagnostics.all)
             }
 
         val sources = Sources.load(contract, document, diagnostics, remote)

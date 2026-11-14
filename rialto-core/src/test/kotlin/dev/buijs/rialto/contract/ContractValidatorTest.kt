@@ -197,7 +197,7 @@ class ContractValidatorTest {
                 .mapNotNull { row.find(it) }
                 .associate { it.groupValues[1] to it.groupValues[2].split(",").map(String::trim) }
 
-        val codes = Code.entries.filter { it != Code.INTERNAL }
+        val codes = Code.entries
 
         assertThat(codes.map { it.id }).containsExactlyElementsOf(table.keys)
         codes.forEach { assertThat(table.getValue(it.id)).contains(it.requirement) }

@@ -201,7 +201,7 @@ object RemoteSources {
                 emptyMap()
             }
 
-        /** Writes the sources section; the generators section stays as it is, also when written meanwhile. */
+        /** Writes the sources section. */
         private fun writeLock(hashes: Map<String, String>) {
             RialtoLock(lockFile).update { it.copy(sources = hashes) }
         }

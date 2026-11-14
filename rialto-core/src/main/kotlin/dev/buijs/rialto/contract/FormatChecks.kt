@@ -18,7 +18,12 @@ package dev.buijs.rialto.contract
  * (K1.2, `RIALTO-K004`), and so does each external reference into a source (`RIALTO-S002`); no name is both a type
  * and a shape (K1.3, `RIALTO-K005`); and each type expression is valid (K2.1, `RIALTO-K006`).
  */
-internal class ReferenceChecks(
+internal object FormatChecks : ContractChecks {
+    override fun run(context: CheckContext) = FormatRun(context).run()
+}
+
+/** One run of [FormatChecks] over one contract. */
+private class FormatRun(
     private val context: CheckContext,
 ) {
     private val contract = context.contract

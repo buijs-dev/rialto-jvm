@@ -1,6 +1,6 @@
 # Diagnostics
 
-Every finding of Rialto tooling has a code `RIALTO-<area><nnn>`, a severity, a location (file, line and column, and a JSON Pointer into the document) and, where one applies, the specification requirement it enforces. The `K`, `S` and `P` codes are the specification's [standard diagnostic codes](https://github.com/buijs-dev/rialto-spec/blob/develop/spec/contract.md#standard-diagnostic-codes) (K1.10); `X` belongs to the tooling. Every implementation of Rialto tooling uses this table, so the same contract produces the same codes in every language.
+Every finding of Rialto tooling has a code `RIALTO-<area><nnn>`, a severity, a location (file, line and column, and a JSON Pointer into the document) and, where one applies, the specification requirement it enforces. The `K`, `S` and `P` codes are the specification's [standard diagnostic codes](https://github.com/buijs-dev/rialto-spec/blob/develop/spec/contract.md#standard-diagnostic-codes) (K1.10). Every implementation of Rialto tooling uses this table, so the same contract produces the same codes in every language.
 
 Output format:
 
@@ -14,7 +14,6 @@ error[RIALTO-K004] shipment.rialto.yaml:149:13 #/operations/approveShipment/emit
 | `K` | contract and schema |
 | `S` | sources |
 | `P` | profile rules |
-| `X` | internal |
 
 | Code | Requirement | Meaning |
 |---|---|---|
@@ -77,11 +76,10 @@ error[RIALTO-K004] shipment.rialto.yaml:149:13 #/operations/approveShipment/emit
 | `RIALTO-P043` | U3.11 | per entry of `visibleWhen` or `enabledWhen` of an action, row action or field (at the entry): a path that does not resolve in the row (row action) or the view's data, goes through a collection, is not of an enum type, lists a member the enum lacks, or for `actor` is not a `string` or `uuid`; or a view without data (no `load` and `submit`, or a `load` without a single output or a `submit` without input) whose action or field declares a condition |
 | `RIALTO-P044` | U2.11 | an `options` field that edits no input (no `edit` and no `submit`, at `options`), is not a to-one property of that input, or references no single entity (its type with `relation: reference`, or the value type of the single identity of one entity) (at `options`); an operation that is neither a list operation nor an `output: list<T>`, returns another type than the entity or a projection that carries its identity (under any name), has an `input`, or has a parameter that neither maps to `label` nor is filled by exactly one route parameter of the view of its scalar (at `operation`); a `label` that does not resolve to a scalar, enum or wrapper outside a collection (at `label`) |
 | `RIALTO-P045` | P4.13 | in the storage of an entity or projection: a `list<T>` under `children` or `links` that declares neither `order` nor `orderBy`, or both (at the entry); `order` or `orderBy` on a `set<T>` or on a property that is not a list (at the key), or `order` on a link without a link table (at `order`); an `order` column that is not for the position alone: one that a property of the element maps to, the `parentKey`, the `ownerKey` or `targetKey` of the link, or the element's storage key, `version`, a column of its blobs, its scope or the `ownerKey` of its to-one children (at `order`); an `orderBy` entry that names a property twice, a property the element type lacks, or one that is not a `string` or an ordered scalar, directly or through a wrapper (at the entry, `orderBy/<index>`). An `order` column outside the `int32` and `int64` families, or one that accepts null, is `RIALTO-P026`, and one that the child's table or the link table lacks `RIALTO-S002`, both at `order`; an `orderBy` entry without `asc` or `desc`, or one listed twice, is `RIALTO-K002` |
-| `RIALTO-X001` | — | internal error |
 
 The `K` and `S` codes are checked in full. The `P` codes are those of the profile rules: the table holds all of them, and
-the checks of each profile come with its slice of the [road to 1.0](../README.md#status). The tooling's own codes for
-generation (`G`), export (`E`) and compatibility (`V`) come with the commands that report them.
+the checks of each profile come with its slice of the [road to 1.0](../README.md#status). The tooling's own codes (generation,
+export, compatibility) come with the commands that report them.
 
 The shared test contracts in `rialto-spec/examples/contracts` name the code each invalid contract must produce.
 

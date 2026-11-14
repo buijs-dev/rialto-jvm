@@ -27,18 +27,16 @@ import kotlin.io.path.name
 import kotlin.io.path.readText
 
 /**
- * `rialto.lock` next to a contract: the SHA-256 of every remote source (K4) under `sources`. The pins of generator
- * sources under `generators` belong to the generator tooling; this class keeps that section as it is, so a run that
- * locks sources never drops it. Each run changes only its own section, through [update]: under a file lock shared
- * with rialto-dart, it reads the lock again, changes it and replaces it atomically.
+ * `rialto.lock` next to a contract: the SHA-256 of every remote source (K4) under `sources`. Each run changes it
+ * through [update]: under a file lock shared with rialto-dart, it reads the lock again, changes it and replaces it
+ * atomically.
  */
 class RialtoLock(
     val file: Path,
 ) {
-    /** What the lock holds: the [sources], and the text of the `generators` section, kept verbatim. */
+    /** What the lock holds: the hash of every remote source, by URL. */
     data class Content(
         val sources: Map<String, String> = emptyMap(),
-        val generators: String? = null,
     )
 
     /** The content, empty when there is no lock; throws when the file cannot be read. */
@@ -48,12 +46,7 @@ class RialtoLock(
         if (root.isMissingNode || root.isNull) return Content()
         require(root.isObject) { "not a mapping" }
 
-        val generators = root.path("generators")
-        if (generators.isMissingNode) return Content(sources(root.path("sources")))
-        return Content(
-            sources(root.path("sources")),
-            section(file.readText(), "generators") ?: block(generators),
-        )
+        return Content(sources(root.path("sources")))
     }
 
     /**
@@ -100,43 +93,9 @@ class RialtoLock(
         }
     }
 
-    /**
-     * The text of the top-level block section [key] in [text], from its key line up to the next top-level key,
-     * without trailing blank or comment lines; null when [text] has no such line.
-     */
-    private fun section(
-        text: String,
-        key: String,
-    ): String? {
-        val lines = text.lines()
-        val start = lines.indexOfFirst { it == "$key:" || it.startsWith("$key: ") }
-
-        if (start < 0) return null
-        val end =
-            (start + 1 until lines.size)
-                .firstOrNull {
-                    lines[it].isNotBlank() && !lines[it].startsWith(" ") &&
-                        !lines[it].startsWith("#")
-                }
-                ?: lines.size
-        return lines
-            .subList(start, end)
-            .dropLastWhile { it.isBlank() || it.startsWith("#") }
-            .joinToString("\n")
-    }
-
-    /** A section in another form (such as a flow mapping), written as a block. */
-    private fun block(node: JsonNode): String =
-        "generators:\n" +
-            ContractMapper.yaml
-                .writeValueAsString(node)
-                .trimEnd()
-                .prependIndent("  ")
-
     companion object {
         /**
-         * The text of [content]: `sources` in the form it always had, sorted by URL, and the `generators` section
-         * as it was read. rialto-dart writes the same bytes.
+         * The text of [content]: `sources`, sorted by URL. rialto-dart writes the same bytes.
          */
         fun text(content: Content): String =
             buildString {
@@ -147,14 +106,6 @@ class RialtoLock(
                 if (content.sources.isEmpty()) appendLine("sources: {}") else appendLine("sources:")
                 content.sources.toSortedMap().forEach { (url, hash) ->
                     appendLine("  \"$url\": \"$hash\"")
-                }
-
-                content.generators?.let {
-                    appendLine(
-                        "# The SHA-256 of every jar of each generator source; " +
-                            "`rialto generators update` accepts new versions.",
-                    )
-                    appendLine(it)
                 }
             }
 

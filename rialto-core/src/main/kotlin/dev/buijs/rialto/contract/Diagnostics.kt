@@ -276,7 +276,6 @@ enum class Code(
         "list under children or links declares neither or both of order and orderBy, a set " +
             "declares one, or an orderBy entry is not a sortable property of the element type",
     ),
-    INTERNAL("RIALTO-X001", null, "internal error"),
 }
 
 /** One finding. */

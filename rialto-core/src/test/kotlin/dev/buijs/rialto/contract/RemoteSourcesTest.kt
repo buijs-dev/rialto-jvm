@@ -127,22 +127,4 @@ class RemoteSourcesTest {
         assertThat(RemoteSources.fileName("https://x.example/")).isEqualTo("source")
         assertThat(RemoteSources.fileName("https://x.example/a%2F..%2Fb")).isEqualTo("a_2F.._2Fb")
     }
-
-    @Test
-    fun `keeps the generators section of the lock when it locks a source`() {
-        val generators =
-            """
-            generators:
-              "maven:g:a":
-                ids: ["gen"]
-                version: "1.0"
-                jars:
-                  - {name: "a-1.0.jar", sha256: "abc"}
-            """.trimIndent()
-        work.resolve(RemoteSources.LOCK_FILE).writeText("sources: {}\n$generators\n")
-        assertThat(codes()).isEmpty()
-        assertThat(lock())
-            .contains("\"$url\": \"${RemoteSources.sha256(served!!)}\"")
-            .contains(generators)
-    }
 }
