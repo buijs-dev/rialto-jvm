@@ -84,4 +84,42 @@ class JsonFormatTest {
 
         assertThat(code).isEqualTo(64)
     }
+
+    @Test
+    fun `a missing file is an entry with valid false and a diagnostic without code`() {
+        val valid = contracts.resolve("valid/minimal.yaml").toString()
+        val (code, output) = run("validate", "--format", "json", valid, "missing.rialto.yaml")
+        val json = ContractMapper.json.readTree(output)
+        assertThat(code).isEqualTo(1)
+        assertThat(json.path("valid").asBoolean()).isFalse()
+        assertThat(json.at("/contracts/0/valid").asBoolean()).isTrue()
+        assertThat(json.at("/contracts/1/file").asText()).isEqualTo("missing.rialto.yaml")
+        assertThat(json.at("/contracts/1/valid").asBoolean()).isFalse()
+        val diagnostic = json.at("/contracts/1/diagnostics/0")
+        assertThat(diagnostic.path("severity").asText()).isEqualTo("error")
+        assertThat(diagnostic.path("code").isNull).isTrue()
+        assertThat(diagnostic.path("message").asText()).isEqualTo("missing.rialto.yaml not found")
+    }
+
+    @Test
+    fun `every diagnostic has the same fields, null when unknown`() {
+        val file = contracts.resolve("invalid/not-a-mapping.yaml")
+        val (_, output) = run("validate", "--format", "json", file.toString())
+        val diagnostic = ContractMapper.json.readTree(output).at("/contracts/0/diagnostics/0")
+        assertThat(diagnostic.fieldNames().asSequence().toList())
+            .containsExactly(
+                "severity",
+                "code",
+                "requirement",
+                "file",
+                "line",
+                "column",
+                "pointer",
+                "message",
+                "hint",
+            )
+        assertThat(diagnostic.path("code").asText()).isEqualTo("RIALTO-K001")
+        assertThat(diagnostic.path("line").isNull).isTrue()
+        assertThat(diagnostic.path("hint").isNull).isTrue()
+    }
 }
