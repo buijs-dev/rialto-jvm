@@ -54,6 +54,11 @@ enum class Code(
     INCLUDE_NO_MATCH("RIALTO-K007", "K5.2", "include path matches no file"),
     FRAGMENT_ROOT_KEY("RIALTO-K008", "K5.2", "fragment declares info, sources or include"),
     SECTION_TWICE("RIALTO-K009", "K5.4", "section that belongs in one file appears in two"),
+    LOCK_UNUSABLE(
+        "RIALTO-K010",
+        "K4.5",
+        "rialto.lock cannot be read, or cannot be written when it must change",
+    ),
     SOURCE_UNREADABLE("RIALTO-S001", "K1.9", "referenced source cannot be read"),
     SOURCE_REFERENCE("RIALTO-S002", "K1.2", "reference into a source does not resolve"),
     REMOTE_UNAVAILABLE(

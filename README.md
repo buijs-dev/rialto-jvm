@@ -38,7 +38,8 @@ that one document, for publishing or for tools that read a single file.
 (`~/.cache/rialto`, or `RIALTO_CACHE`), and a changed upstream document fails with `RIALTO-S004` until
 `rialto sources update <contract>` (Gradle: `rialtoSourcesUpdate`) accepts it. `--offline` (Gradle: `--offline`) reads
 the cache only. The JVM and the Dart tooling change `rialto.lock` under a shared file lock (in `~/.cache/rialto/locks`)
-and replace it atomically. This release writes the `sources` section only; the generator pins come with slice 10.
+and replace it atomically. A lock that cannot be read, or cannot be written when it must change, fails with
+`RIALTO-K010` (K4.5); it is never read as an empty lock. This release writes the `sources` section only; the generator pins come with slice 10.
 
 Diagnostic codes are listed in [docs/diagnostics.md](docs/diagnostics.md).
 

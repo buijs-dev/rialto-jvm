@@ -34,6 +34,11 @@ import kotlin.io.path.readText
 class RialtoLock(
     val file: Path,
 ) {
+    /** A lock that exists but is no lock: the message is the reason (K4.5). */
+    class Unreadable(
+        reason: String,
+    ) : java.io.IOException(reason)
+
     /** What the lock holds: the hash of every remote source, by URL. */
     data class Content(
         val sources: Map<String, String> = emptyMap(),
@@ -44,7 +49,7 @@ class RialtoLock(
         if (!file.exists()) return Content()
         val root = ContractMapper.yaml.readTree(file.readText()) ?: return Content()
         if (root.isMissingNode || root.isNull) return Content()
-        require(root.isObject) { "not a mapping" }
+        if (!root.isObject) throw Unreadable("not a mapping")
 
         return Content(sources(root.path("sources")))
     }
@@ -84,10 +89,10 @@ class RialtoLock(
 
     private fun sources(node: JsonNode): Map<String, String> {
         if (node.isMissingNode || node.isNull) return emptyMap()
-        require(node.isObject) { "sources is not a mapping" }
+        if (!node.isObject) throw Unreadable("sources is not a mapping")
 
         return node.properties().associate { (url, hash) ->
-            require(hash.isTextual) { "$url is not a URL with a hash" }
+            if (!hash.isTextual) throw Unreadable("$url is not a URL with a hash")
 
             url to hash.asText()
         }

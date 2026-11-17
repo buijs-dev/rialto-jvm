@@ -26,6 +26,7 @@ error[RIALTO-K004] shipment.rialto.yaml:149:13 #/operations/approveShipment/emit
 | `RIALTO-K007` | K5.2 | include path matches no file |
 | `RIALTO-K008` | K5.2 | fragment declares info, sources or include |
 | `RIALTO-K009` | K5.4 | section that belongs in one file appears in two |
+| `RIALTO-K010` | K4.5 | rialto.lock cannot be read, or cannot be written when it must change |
 | `RIALTO-S001` | K1.9 | referenced source cannot be read |
 | `RIALTO-S002` | K1.2 | reference into a source does not resolve |
 | `RIALTO-S003` | K4.3 | remote source can neither be fetched nor found in the cache |

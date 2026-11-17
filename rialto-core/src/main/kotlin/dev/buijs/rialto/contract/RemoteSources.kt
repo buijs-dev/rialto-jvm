@@ -98,13 +98,21 @@ object RemoteSources {
 
     /** One run over the remote sources of a contract: reads `rialto.lock`, writes it in [finish]. */
     class Session(
-        contractFile: Path,
+        private val contractFile: Path,
         private val mode: RemoteMode,
         private val diagnostics: Diagnostics,
     ) {
         private val lockFile = contractFile.toAbsolutePath().parent.resolve(LOCK_FILE)
-        private val locked: Map<String, String> = readLock()
+
+        /** Why the lock cannot be read, or null when it can (or does not exist). */
+        private var unreadable: String? = null
+
+        /** The locked hashes, or null when the lock exists but cannot be read: never taken as an empty lock. */
+        private val locked: Map<String, String>? = readLock()
         private val hashes = linkedMapOf<String, String>()
+
+        /** The remote sources an unreadable lock leaves unpinned. */
+        private val unpinned = linkedSetOf<String>()
 
         /** The cached copy of [url], fetched when needed, or null (reported at [location]). */
         fun resolve(
@@ -119,6 +127,13 @@ object RemoteSources {
                 )
                 return null
             }
+
+            // An unreadable lock is reported once, in finish (RIALTO-K010); its sources are neither fetched nor pinned.
+            val locked =
+                locked ?: run {
+                    unpinned += url
+                    return null
+                }
 
             val pinned = locked[url]
             val name = fileName(url)
@@ -171,6 +186,12 @@ object RemoteSources {
 
         /** Writes `rialto.lock` when a source was added or updated; returns the changed hashes. */
         fun finish(): List<SourceChange> {
+            val locked =
+                locked ?: run {
+                    lockError("Cannot read the lock $lockFile: $unreadable", unpinned)
+                    return emptyList()
+                }
+
             if (diagnostics.hasErrors) return emptyList()
             val changes =
                 hashes
@@ -185,20 +206,58 @@ object RemoteSources {
                     locked.filterKeys { it in hashes } + hashes
                 }
 
-            if (next != locked && mode != RemoteMode.OFFLINE) writeLock(next)
+            if (next != locked && mode != RemoteMode.OFFLINE) {
+                try {
+                    writeLock(next)
+                } catch (e: java.io.IOException) {
+                    // Dropping an entry that is no longer used can wait for the next run; a new or changed hash cannot.
+                    if (changes.isEmpty()) return changes
+                    lockError(
+                        "Cannot write the lock $lockFile: ${osMessage(e)}",
+                        changes.map { it.url },
+                    )
+                    return emptyList()
+                }
+            }
+
             return changes
         }
 
-        private fun readLock(): Map<String, String> =
+        /** RIALTO-K010 on the contract (K4.5), naming the lock and the sources it leaves unpinned. */
+        private fun lockError(
+            message: String,
+            unpinned: Collection<String>,
+        ) {
+            val sources =
+                if (unpinned.isEmpty()) {
+                    ""
+                } else {
+                    ". Not pinned: ${unpinned.joinToString(
+                        ", ",
+                    )}"
+                }
+
+            diagnostics.error(
+                Code.LOCK_UNUSABLE,
+                message + sources,
+                Location(contractFile),
+                "Repair or remove $LOCK_FILE, then run `rialto sources update`",
+            )
+        }
+
+        private fun readLock(): Map<String, String>? =
             try {
+                if (Files.isDirectory(lockFile)) throw RialtoLock.Unreadable("it is a directory")
                 RialtoLock(lockFile).read().sources
-            } catch (e: Exception) {
-                diagnostics.error(
-                    Code.UNREADABLE,
-                    "$LOCK_FILE cannot be read: ${e.message}",
-                    Location(lockFile),
-                )
-                emptyMap()
+            } catch (e: RialtoLock.Unreadable) {
+                unreadable = e.message
+                null
+            } catch (e: com.fasterxml.jackson.core.JsonProcessingException) {
+                unreadable = "not valid YAML: ${e.originalMessage}"
+                null
+            } catch (e: java.io.IOException) {
+                unreadable = osMessage(e)
+                null
             }
 
         /** Writes the sources section. */
@@ -243,6 +302,15 @@ object RemoteSources {
         )
         return file
     }
+
+    /** The operating system's message for a failed file operation, without the path of the file. */
+    internal fun osMessage(e: java.io.IOException): String =
+        when (e) {
+            is java.nio.file.AccessDeniedException -> "Permission denied"
+            is java.nio.file.NoSuchFileException -> "No such file or directory"
+            is java.nio.file.FileSystemException -> e.reason ?: e.javaClass.simpleName
+            else -> e.message ?: e.javaClass.simpleName
+        }
 
     fun sha256(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
