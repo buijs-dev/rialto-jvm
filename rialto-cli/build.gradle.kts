@@ -1,7 +1,8 @@
 plugins {
-    id("buijs.kotlin")
-    id("buijs.repositories")
-    id("buijs.formatting")
+    id("dev.buijs.conventions.kotlin")
+    id("dev.buijs.conventions.repositories")
+    id("dev.buijs.conventions.formatting")
+    id("dev.buijs.conventions.coverage")
     application
 }
 

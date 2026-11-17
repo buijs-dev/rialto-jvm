@@ -1,5 +1,5 @@
 plugins {
-    id("buijs.library")
+    id("dev.buijs.conventions.library")
 }
 
 description = "Rialto tooling: the contract model, loading, bundling and validation of contracts"

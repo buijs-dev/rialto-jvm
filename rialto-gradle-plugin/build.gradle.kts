@@ -1,5 +1,5 @@
 plugins {
-    id("buijs.gradle-plugin")
+    id("dev.buijs.conventions.gradle-plugin")
 }
 
 description = "Gradle plugin that validates and bundles Rialto contracts"
