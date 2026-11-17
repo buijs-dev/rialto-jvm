@@ -47,13 +47,36 @@ object ContractFiles {
     /** Keys only the root declares. */
     private val rootOnly = setOf("info", "sources", "include")
 
+    private val contractSchema: JsonNode by lazy {
+        requireNotNull(
+            ContractFiles::class.java.getResourceAsStream("contract-1.0.0.schema.json"),
+        ) {
+            "Schema resource missing"
+        }.use { ContractMapper.json.readTree(it) }
+    }
+
+    private val schemaConfig: SchemaValidatorsConfig =
+        SchemaValidatorsConfig
+            .builder()
+            .formatAssertionsEnabled(true)
+            .pathType(PathType.JSON_POINTER)
+            .build()
+
+    /** The schema of the root's `include` (K5.2). */
+    private val includeSchema: JsonSchema by lazy {
+        val include =
+            contractSchema.path("properties").path("include").deepCopy<ObjectNode>().apply {
+                put("\$schema", contractSchema.path("\$schema").asText())
+            }
+
+        JsonSchemaFactory
+            .getInstance(
+                SpecVersion.VersionFlag.V202012,
+            ).getSchema(include, schemaConfig)
+    }
+
     private val fragmentSchema: JsonSchema by lazy {
-        val schema =
-            requireNotNull(
-                ContractFiles::class.java.getResourceAsStream("contract-1.0.0.schema.json"),
-            ) {
-                "Schema resource missing"
-            }.use { ContractMapper.json.readTree(it) }
+        val schema = contractSchema
 
         val fragment =
             ContractMapper.json.createObjectNode().apply {
@@ -62,13 +85,10 @@ object ContractFiles {
                 put("\$ref", "#/\$defs/fragment")
             }
 
-        val config =
-            SchemaValidatorsConfig
-                .builder()
-                .formatAssertionsEnabled(true)
-                .pathType(PathType.JSON_POINTER)
-                .build()
-        JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012).getSchema(fragment, config)
+        JsonSchemaFactory
+            .getInstance(
+                SpecVersion.VersionFlag.V202012,
+            ).getSchema(fragment, schemaConfig)
     }
 
     /**
@@ -88,6 +108,17 @@ object ContractFiles {
             }
 
         val include = document.root.get("include") ?: return document
+        // The bundled form drops `include`, so the JSON Schema of the whole contract never sees it: it is checked here.
+        val invalid = includeSchema.validate(include)
+        invalid.forEach { message ->
+            diagnostics.error(
+                Code.SCHEMA,
+                message.message.substringAfter(": ", message.message),
+                document.locate("/include" + pointer(message.instanceLocation.toString())),
+            )
+        }
+
+        if (invalid.isNotEmpty()) return document
         val bundle = Bundle(document)
         fragments(root, include, document, diagnostics).forEach { bundle.add(it, diagnostics) }
 
@@ -164,19 +195,35 @@ object ContractFiles {
         return matched.map { base.resolve(it) }
     }
 
-    /** A path pattern of `include`: `*` within one segment, `**` any number of segments, also none. */
+    /**
+     * A path pattern of `include`: `*` within one segment, `**` any number of segments, also none. A final `**`
+     * matches every file below its directory.
+     */
     internal fun glob(pattern: String): Regex {
+        val segments = pattern.split('/')
         val regex =
-            pattern.split('/').joinToString("") { segment ->
-                if (segment == "**") {
-                    "(?:[^/]+/)*"
-                } else {
-                    segment.split('*').joinToString("[^/]*") { Regex.escape(it) } + "/"
+            segments.withIndex().joinToString("") { (index, segment) ->
+                val last = index == segments.lastIndex
+                when {
+                    segment == "**" && last -> {
+                        "(?:[^/]+/)*[^/]+"
+                    }
+                    segment == "**" -> {
+                        "(?:[^/]+/)*"
+                    }
+                    else -> {
+                        segment.split('*').joinToString("[^/]*") { Regex.escape(it) } +
+                            if (last) "" else "/"
+                    }
                 }
             }
 
-        return Regex(regex.removeSuffix("/"))
+        return Regex(regex)
     }
+
+    /** The JSON Pointer of a schema finding: the root as the empty pointer. */
+    private fun pointer(location: String): String =
+        location.takeUnless { it == "/" || it == "$" } ?: ""
 
     /** The root with the fragments merged into it, in reading order. */
     private class Bundle(
@@ -251,10 +298,7 @@ object ContractFiles {
                 diagnostics.error(
                     Code.SCHEMA,
                     message.message.substringAfter(": ", message.message),
-                    fragment.locate(
-                        message.instanceLocation.toString().takeUnless { it == "/" || it == "$" }
-                            ?: "",
-                    ),
+                    fragment.locate(pointer(message.instanceLocation.toString())),
                 )
             }
 
