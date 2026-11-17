@@ -1,10 +1,9 @@
 pluginManagement {
     repositories {
         mavenLocal()
-        // The dev.buijs convention plugins: their snapshots are published to Repsy.
-        maven("https://repo.repsy.io/mvn/buijs-dev/maven") {
+        // The dev.buijs build tooling (convention and style plugins): releases and snapshots on Repsy.
+        maven("https://repo.repsy.io/buijs-dev/maven2") {
             mavenContent {
-                snapshotsOnly()
                 includeGroupByRegex("dev\\.buijs.*")
             }
         }
