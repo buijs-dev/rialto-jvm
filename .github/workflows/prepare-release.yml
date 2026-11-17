@@ -1,0 +1,20 @@
+name: Prepare Release
+
+# A v* tag on develop opens the pull request from release/<version> (changelog and next -SNAPSHOT) to develop; once
+# that pull request is merged, the release pull request from develop to main is opened.
+on:
+  push:
+    tags: [ 'v*' ]
+  pull_request:
+    types: [ closed ]
+    branches: [ develop ]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    uses: buijs-dev/ci-templates/.github/workflows/prepare-release.yml@main
+    with:
+      root-dir: ${{ vars.ROOT_DIR || '.' }}
