@@ -55,8 +55,13 @@ class LocatedDocument internal constructor(
         }
     }
 
-    /** The element at [pointer], or null when there is none. */
-    fun at(pointer: String): JsonNode? = root.at(pointer).takeUnless { it.isMissingNode }
+    /** The element at [pointer], or null when there is none, also when [pointer] is no JSON Pointer (no leading `/`). */
+    fun at(pointer: String): JsonNode? =
+        if (pointer.isNotEmpty() && !pointer.startsWith("/")) {
+            null
+        } else {
+            root.at(pointer).takeUnless { it.isMissingNode }
+        }
 
     companion object {
         private val nodes = JsonNodeFactory.instance
