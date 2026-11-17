@@ -1,0 +1,416 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "Shipment events",
+    "version": "1.0.0"
+  },
+  "servers": {
+    "broker": {
+      "host": "broker.example.invalid:9092",
+      "protocol": "kafka"
+    },
+    "app": {
+      "host": "api.example.invalid",
+      "protocol": "https",
+      "description": "Server-Sent Events for browsers and apps"
+    },
+    "socket": {
+      "host": "api.example.invalid",
+      "protocol": "wss"
+    }
+  },
+  "channels": {
+    "shipmentEvents": {
+      "address": "shipment-events",
+      "messages": {
+        "shipmentApproved": {
+          "$ref": "#/components/messages/ShipmentApproved"
+        }
+      },
+      "servers": [
+        {
+          "$ref": "#/servers/broker"
+        }
+      ]
+    },
+    "shipmentEventsDeadLetter": {
+      "address": "shipment-events.dead-letter",
+      "messages": {
+        "shipmentApproved": {
+          "$ref": "#/components/messages/ShipmentApproved"
+        },
+        "shipmentCancelled": {
+          "$ref": "#/components/messages/ShipmentCancelled"
+        }
+      },
+      "servers": [
+        {
+          "$ref": "#/servers/broker"
+        }
+      ]
+    },
+    "shipmentUpdates": {
+      "address": "/streams/shipments",
+      "servers": [
+        {
+          "$ref": "#/servers/app"
+        }
+      ],
+      "messages": {
+        "shipmentApproved": {
+          "$ref": "#/components/messages/ShipmentApproved"
+        }
+      }
+    },
+    "shipmentCancellations": {
+      "address": "shipment-cancellations",
+      "servers": [
+        {
+          "$ref": "#/servers/broker"
+        }
+      ],
+      "messages": {
+        "shipmentCancelled": {
+          "$ref": "#/components/messages/ShipmentCancelled"
+        }
+      }
+    },
+    "shipmentSocket": {
+      "address": "/streams/shipments/socket",
+      "servers": [
+        {
+          "$ref": "#/servers/socket"
+        }
+      ],
+      "bindings": {
+        "ws": {
+          "method": "GET",
+          "query": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "lastEventId": {
+                "type": "string"
+              }
+            },
+            "required": []
+          },
+          "bindingVersion": "0.1.0"
+        }
+      },
+      "messages": {
+        "shipmentApproved": {
+          "$ref": "#/components/messages/ShipmentApproved"
+        },
+        "shipmentCancelled": {
+          "$ref": "#/components/messages/ShipmentCancelledStream"
+        }
+      }
+    }
+  },
+  "operations": {
+    "publishShipmentApproved": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/shipmentEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/shipmentEvents/messages/shipmentApproved"
+        }
+      ],
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/oauth",
+          "scopes": [
+            "shipments:write"
+          ]
+        }
+      ]
+    },
+    "receiveShipmentApproved": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/shipmentEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/shipmentEvents/messages/shipmentApproved"
+        }
+      ],
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/oauth",
+          "scopes": [
+            "shipments:read"
+          ]
+        }
+      ]
+    },
+    "streamShipmentUpdates": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/shipmentUpdates"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/shipmentUpdates/messages/shipmentApproved"
+        }
+      ],
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/oauth",
+          "scopes": [
+            "shipments:read"
+          ]
+        }
+      ]
+    },
+    "publishShipmentCancelled": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/shipmentCancellations"
+      },
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/oauth",
+          "scopes": [
+            "shipments:write"
+          ]
+        }
+      ]
+    },
+    "receiveShipmentCancelled": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/shipmentCancellations"
+      },
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/oauth",
+          "scopes": [
+            "shipments:read"
+          ]
+        }
+      ]
+    },
+    "streamShipmentSocket": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/shipmentSocket"
+      },
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/oauth",
+          "scopes": [
+            "shipments:read"
+          ]
+        }
+      ]
+    }
+  },
+  "components": {
+    "messages": {
+      "ShipmentApproved": {
+        "name": "ShipmentApproved",
+        "contentType": "application/cloudevents+json",
+        "payload": {
+          "$ref": "#/components/schemas/ShipmentApprovedEvent"
+        }
+      },
+      "ShipmentCancelled": {
+        "name": "ShipmentCancelled",
+        "contentType": "application/json",
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ce_specversion": {
+              "type": "string"
+            },
+            "ce_id": {
+              "type": "string"
+            },
+            "ce_source": {
+              "type": "string"
+            },
+            "ce_type": {
+              "type": "string"
+            },
+            "ce_subject": {
+              "type": "string"
+            },
+            "ce_time": {
+              "type": "string"
+            },
+            "ce_datacontenttype": {
+              "type": "string"
+            },
+            "ce_tenant": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ce_specversion",
+            "ce_id",
+            "ce_source",
+            "ce_type",
+            "ce_subject",
+            "ce_time",
+            "ce_datacontenttype",
+            "ce_tenant"
+          ]
+        },
+        "payload": {
+          "$ref": "#/components/schemas/ShipmentCancelledData"
+        }
+      },
+      "ShipmentCancelledStream": {
+        "name": "ShipmentCancelledStream",
+        "contentType": "application/cloudevents+json",
+        "payload": {
+          "$ref": "#/components/schemas/ShipmentCancelledEvent"
+        }
+      }
+    },
+    "schemas": {
+      "ShipmentApprovedEvent": {
+        "type": "object",
+        "required": [
+          "specversion",
+          "id",
+          "source",
+          "type",
+          "subject",
+          "time",
+          "datacontenttype",
+          "data"
+        ],
+        "properties": {
+          "specversion": {
+            "const": "1.0"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "const": "/shipments"
+          },
+          "type": {
+            "const": "com.example.shipment.approved.v1"
+          },
+          "subject": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "datacontenttype": {
+            "const": "application/json"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ShipmentApprovedData"
+          }
+        }
+      },
+      "ShipmentApprovedData": {
+        "type": "object",
+        "required": [
+          "shipmentId",
+          "approvedAt"
+        ],
+        "properties": {
+          "shipmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "approvedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ShipmentCancelledData": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "shipmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cancelledAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "shipmentId",
+          "cancelledAt",
+          "reason"
+        ]
+      },
+      "ShipmentCancelledEvent": {
+        "type": "object",
+        "required": [
+          "specversion",
+          "id",
+          "source",
+          "type",
+          "subject",
+          "time",
+          "datacontenttype",
+          "data"
+        ],
+        "properties": {
+          "specversion": {
+            "const": "1.0"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "const": "/shipments"
+          },
+          "type": {
+            "const": "com.example.shipment.cancelled.v1"
+          },
+          "subject": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "datacontenttype": {
+            "const": "application/json"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ShipmentCancelledData"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "oauth": {
+        "type": "oauth2",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://auth.example.invalid/token",
+            "availableScopes": {
+              "shipments:read": "Read shipments",
+              "shipments:write": "Edit shipments"
+            }
+          }
+        }
+      }
+    }
+  }
+}

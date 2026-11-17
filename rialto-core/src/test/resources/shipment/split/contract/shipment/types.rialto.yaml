@@ -1,0 +1,490 @@
+rialto: '1.0.0'
+types:
+  ShipmentId:
+    kind: value
+    wraps: uuid
+  WarehouseId:
+    kind: value
+    wraps: uuid
+  Status:
+    kind: enum
+    members:
+    - draft
+    - approved
+    - rejected
+  Address:
+    kind: value
+    invariant: Address.nonBlank
+    properties:
+      street:
+        type: string
+        minLength: 1
+        maxLength: 200
+      city:
+        type: string
+        minLength: 1
+        maxLength: 120
+  ShipmentLine:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      quantity:
+        type: int32
+        minimum: 1
+  Shipment:
+    kind: entity
+    description: A shipment from a warehouse to a destination.
+    aggregateRoot: true
+    transitions:
+      property: state
+      rules:
+        approve:
+          from:
+          - draft
+          to: approved
+          sets:
+            approvedAt: now
+            approvedBy: actor
+          emits:
+          - ShipmentApproved
+        reject:
+          from:
+          - draft
+          to: rejected
+    identity:
+    - id
+    properties:
+      id:
+        type: ShipmentId
+      note:
+        type: string
+        nullable: true
+        maxLength: 280
+        description: Free note for the driver.
+      expectedDelivery:
+        type: date
+        nullable: true
+      destination:
+        type: Address
+      state:
+        type: Status
+        default:
+          value: draft
+          phase: business
+      lines:
+        type: list<ShipmentLine>
+        relation: owned
+        maxItems: 100
+      lineCount:
+        type: int32
+        description: The number of lines, counted in every read.
+      warehouse:
+        type: WarehouseId
+        nullable: true
+        relation: reference
+      recipient:
+        type: Recipient
+        immutable: true
+      priority:
+        type: Priority
+        default:
+          value: standard
+          phase: decode
+      createdAt:
+        type: instant
+      approvedBy:
+        type: string
+        nullable: true
+      approvedAt:
+        type: instant
+        nullable: true
+      rejectionReason:
+        type: string
+        nullable: true
+        maxLength: 280
+      label:
+        type: string
+      tags:
+        type: list<Tag>
+        relation: reference
+      scans:
+        type: list<TrackingScan>
+        relation: reference
+      packages:
+        type: list<ShipmentPackage>
+        relation: owned
+      customsDeclaration:
+        type: CustomsDeclaration
+        nullable: true
+        relation: owned
+      handlingUnit:
+        type: HandlingUnit
+        nullable: true
+        relation: reference
+      serviceCodes:
+        type: set<string>
+  ShipmentApproved:
+    kind: value
+    properties:
+      shipmentId:
+        type: ShipmentId
+      approvedAt:
+        type: instant
+  ShipmentSummary:
+    kind: projection
+    source: Shipment
+    properties:
+    - id
+    - state
+    - note
+    - expectedDelivery
+    - createdAt
+  DeliveryProof:
+    kind: entity
+    identity:
+    - shipment
+    description: Proof that a shipment was delivered, kept outside the row in a blob store.
+    properties:
+      shipment:
+        type: ShipmentId
+      file:
+        type: binary
+        maxSize: 10485760
+        mediaTypes:
+        - image/jpeg
+        - application/pdf
+        description: A photo or a signed PDF of the delivery.
+  Priority:
+    kind: enum
+    members:
+    - standard
+    - express
+    extensible: true
+  PersonRecipient:
+    kind: value
+    properties:
+      name:
+        type: string
+        minLength: 1
+  CompanyRecipient:
+    kind: value
+    properties:
+      companyName:
+        type: string
+        minLength: 1
+      contact:
+        type: string
+  Recipient:
+    kind: union
+    discriminator: kind
+    variants:
+      person: PersonRecipient
+      company: CompanyRecipient
+  Warehouse:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: WarehouseId
+      name:
+        type: string
+        minLength: 1
+        maxLength: 120
+  Tag:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      name:
+        type: string
+  TrackingScan:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      scannedAt:
+        type: instant
+  ShipmentPackage:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      weightKg:
+        type: decimal(8,3)
+        minimum: 0.001
+  CustomsDeclaration:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      contents:
+        type: string
+        minLength: 1
+  Carrier:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      name:
+        type: string
+        minLength: 1
+        maxLength: 120
+      contactEmail:
+        type: string
+        nullable: true
+        format: email
+      deletedAt:
+        type: instant
+        nullable: true
+        description: When the carrier was deleted; only a read that includes deleted carriers shows one.
+  CarrierRate:
+    kind: entity
+    identity:
+    - carrierId
+    - zone
+    properties:
+      carrierId:
+        type: uuid
+      zone:
+        type: string
+      amount:
+        type: decimal(10,2)
+        minimum: 0
+  Pallet:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      capacityKg:
+        type: int32
+        minimum: 1
+  Container:
+    kind: entity
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      seal:
+        type: string
+  HandlingUnit:
+    kind: union
+    discriminator: kind
+    variants:
+      pallet: Pallet
+      container: Container
+  ShipmentCity:
+    kind: projection
+    source: Shipment
+    properties:
+      id: id
+      city: destination.city
+  ShipmentCancelled:
+    kind: value
+    properties:
+      shipmentId:
+        type: ShipmentId
+      cancelledAt:
+        type: instant
+      reason:
+        type: string
+  WarehouseService:
+    kind: value
+    properties:
+      priority:
+        type: Priority
+  SavedSearch:
+    kind: entity
+    description: A shipment list filter that a user saved; only that user sees it, in their tenant.
+    identity:
+    - id
+    properties:
+      id:
+        type: uuid
+      name:
+        type: string
+        minLength: 1
+        maxLength: 80
+      filter:
+        type: string
+        minLength: 1
+        maxLength: 1000
+        description: An RSQL filter for listShipments.
+      owner:
+        type: string
+        description: The user who saved it, from the verified token; shown, never sent.
+shapes:
+  CreateShipment:
+    source: Shipment
+    command: create
+    properties:
+      id:
+        role: application
+        provider: newShipmentId
+      note:
+        role: caller
+        maxLength: 200
+      expectedDelivery:
+        role: caller
+      destination:
+        role: caller
+      warehouse:
+        role: caller
+        as: identity
+      lines:
+        role: caller
+        as: command
+        shape: CreateShipmentLine
+      recipient:
+        role: caller
+      priority:
+        role: caller
+      createdAt:
+        role: storage
+      approvedBy:
+        role: derived
+      label:
+        role: derived
+      tags:
+        role: caller
+        as: identity
+        uniqueItems: true
+      packages:
+        role: caller
+        as: command
+        shape: CreateShipmentPackage
+      customsDeclaration:
+        role: caller
+        as: command
+        shape: CreateCustomsDeclaration
+      handlingUnit:
+        role: caller
+        as: identity
+      serviceCodes:
+        role: caller
+  CreateShipmentLine:
+    source: ShipmentLine
+    command: create
+    properties:
+      id:
+        role: application
+        provider: newLineId
+      quantity:
+        role: caller
+  PatchShipmentNote:
+    source: Shipment
+    command: update
+    strategy: merge-patch
+    properties:
+      note:
+        role: caller
+    partial: true
+  CreateShipmentPackage:
+    source: ShipmentPackage
+    command: create
+    properties:
+      id:
+        role: application
+        provider: newPackageId
+      weightKg:
+        role: caller
+  CreateCustomsDeclaration:
+    source: CustomsDeclaration
+    command: create
+    properties:
+      id:
+        role: application
+        provider: newDeclarationId
+      contents:
+        role: caller
+  DecideShipment:
+    source: Shipment
+    command: update
+    properties:
+      rejectionReason:
+        role: caller
+    strategy: merge-patch
+  ReplaceCarrier:
+    source: Carrier
+    command: update
+    properties:
+      name:
+        role: caller
+      contactEmail:
+        role: caller
+    strategy: replace
+  CountShipments:
+    source: Shipment
+    properties:
+      state:
+        role: caller
+    partial: true
+  PatchShipmentContents:
+    source: Shipment
+    command: update
+    properties:
+      warehouse:
+        role: caller
+        as: identity
+      lines:
+        role: caller
+        as: command
+        shape: ReconcileShipmentLine
+      packages:
+        role: caller
+        as: command
+        shape: CreateShipmentPackage
+      tags:
+        role: caller
+        as: identity
+        uniqueItems: true
+    strategy: merge-patch
+    partial: true
+  ReconcileShipmentLine:
+    source: ShipmentLine
+    command: update
+    strategy: replace
+    properties:
+      id:
+        role: caller
+      quantity:
+        role: caller
+  UploadDeliveryProof:
+    source: DeliveryProof
+    properties:
+      shipment:
+        role: caller
+      file:
+        role: caller
+  DeliveryProofFile:
+    source: DeliveryProof
+    properties:
+      file:
+        role: derived
+  CreateSavedSearch:
+    source: SavedSearch
+    command: create
+    properties:
+      id:
+        role: application
+        provider: newSavedSearchId
+      name:
+        role: caller
+      filter:
+        role: caller

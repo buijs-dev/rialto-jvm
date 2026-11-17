@@ -1,0 +1,8 @@
+rialto: '1.0.0'
+navigation:
+  home: ShipmentList
+  primary:
+  - view: ShipmentList
+    icon: shipments
+    label: navigation.shipments
+    badge: countShipments

@@ -1,0 +1,14 @@
+name: Publish Snapshot
+
+# Every push to develop publishes the -SNAPSHOT version of every published module to Repsy.
+on:
+  push:
+    branches: [ develop ]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    uses: buijs-dev/ci-templates/.github/workflows/publish-snapshot.yml@main
+    with:
+      root-dir: ${{ vars.ROOT_DIR || '.' }}
+    secrets: inherit

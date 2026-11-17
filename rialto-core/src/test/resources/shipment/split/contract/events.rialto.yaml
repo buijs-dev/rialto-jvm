@@ -1,0 +1,48 @@
+rialto: '1.0.0'
+events:
+  ShipmentApproved:
+    type: com.example.shipment.approved.v1
+    source: /shipments
+    subject: shipmentId
+    data: ShipmentApproved
+    channel: events#/channels/shipmentEvents
+    mode: structured
+    description: Emitted when a draft shipment is approved.
+  ShipmentCancelled:
+    type: com.example.shipment.cancelled.v1
+    source: /shipments
+    subject: shipmentId
+    data: ShipmentCancelled
+    channel: events#/channels/shipmentCancellations
+    mode: binary
+    description: Emitted when a shipment is cancelled; cancellation is recorded separately from its approval status.
+streams:
+  shipmentUpdates:
+    events:
+    - ShipmentApproved
+    channel: events#/channels/shipmentUpdates
+    transport: sse
+    replay: PT1H
+  shipmentSocket:
+    events:
+    - ShipmentApproved
+    - ShipmentCancelled
+    channel: events#/channels/shipmentSocket
+    transport: websocket
+    replay: PT1H
+    resume: lastEventId
+subscriptions:
+  notifyWarehouse:
+    event: ShipmentApproved
+    handler: authored
+    ordered: true
+    delivery:
+      attempts: 5
+      deadLetter: events#/channels/shipmentEventsDeadLetter
+  recordCancellation:
+    event: ShipmentCancelled
+    handler: authored
+    idempotent: true
+    delivery:
+      attempts: 3
+      deadLetter: events#/channels/shipmentEventsDeadLetter
