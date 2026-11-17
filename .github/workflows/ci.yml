@@ -3,7 +3,7 @@ name: CI
 # Builds and tests every module with the style check, then runs the conformance runner of the specification over its
 # test contracts with the installed command line. The tests read ../rialto-spec: the checkout of rialto-spec at the
 # branch with the same name as this one when it exists (a slice changes both), else develop.
-# The convention plugins (dev.buijs.conventions.settings, dev.buijs.style) come from the snapshots on Repsy.
+# The convention plugins (dev.buijs.conventions.settings, dev.buijs.kotlin-style) come from the snapshots on Repsy.
 on:
   push:
     branches: [ main, develop ]

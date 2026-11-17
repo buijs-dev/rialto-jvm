@@ -52,7 +52,7 @@ runner of the specification runs the installed command line over every test cont
 python3 ../rialto-spec/tools/conformance.py --jobs 8 -- "$PWD/rialto-cli/build/install/rialto/bin/rialto" validate {contract}
 ```
 
-The build uses the `dev.buijs.conventions.settings` and `dev.buijs.style` plugins (gradle-conventions and kotlin-style),
+The build uses the `dev.buijs.conventions.settings` and `dev.buijs.kotlin-style` plugins (gradle-conventions and kotlin-style),
 resolved from Maven Local or the snapshots on Repsy.
 
 ## Status
