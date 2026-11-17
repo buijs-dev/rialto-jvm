@@ -152,18 +152,35 @@ class LoadingTest {
     }
 
     @Test
-    fun `a contract that passes the JSON Schema but does not fit the model is RIALTO-K002 at the root`() {
-        val result =
+    fun `an integer beyond 32 bits is RIALTO-K002 from the JSON Schema, at its pointer`() {
+        val diagnostics =
             validate(
                 "c.yaml",
                 "rialto: '1.0.0'\ninfo: {name: x, version: 1.0.0}\n" +
                     "types:\n  T:\n    kind: value\n    properties:\n      a: {type: string, maxLength: 99999999999999}\n",
+            ).diagnostics
+        assertThat(diagnostics).isNotEmpty().allMatch { it.code == Code.SCHEMA }
+
+        assertThat(
+            diagnostics.map { it.location.pointer },
+        ).contains("/types/T/properties/a/maxLength")
+    }
+
+    @Test
+    fun `a document that does not fit the model is RIALTO-K002 at the root, not a crash`() {
+        // The JSON Schema rejects this document; the model step guards a gap between the schema and the model.
+        val file = work.resolve("c.yaml")
+        val document =
+            LocatedDocument.parse(
+                file,
+                "rialto: '1.0.0'\ninfo: {name: x, version: 1.0.0}\n" +
+                    "types:\n  T:\n    kind: value\n    properties:\n      a: {type: string, maxLength: 99999999999999}\n",
             )
-        val diagnostic = result.diagnostics.single()
-        assertThat(result.contract).isNull()
-        assertThat(result.valid).isFalse()
+        val diagnostics = Diagnostics()
+        assertThat(ContractValidator.model(document, diagnostics)).isNull()
+        val diagnostic = diagnostics.all.single()
         assertThat(diagnostic.code).isEqualTo(Code.SCHEMA)
-        assertThat(diagnostic.location).isEqualTo(Location(work.resolve("c.yaml"), 1, 1, ""))
+        assertThat(diagnostic.location).isEqualTo(Location(file, 1, 1, ""))
         assertThat(diagnostic.message)
             .startsWith("the contract passes the JSON Schema but does not fit the contract model")
             .contains("maxLength")

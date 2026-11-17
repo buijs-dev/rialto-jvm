@@ -108,24 +108,32 @@ object ContractValidator {
 
         if (diagnostics.hasErrors) return ValidationResult(null, diagnostics.all)
 
-        // A contract that is valid against the JSON Schema should always fit the model. When it does not, that is a
-        // gap between the schema and the model: reported as K002 at the root, so the caller gets a finding, not a crash.
         val contract =
-            try {
-                ContractMapper.json.treeToValue<Contract>(document.root)
-            } catch (e: Exception) {
-                diagnostics.error(
-                    Code.SCHEMA,
-                    "the contract passes the JSON Schema but does not fit the contract model: ${e.message}",
-                    document.locate(""),
-                )
-                return ValidationResult(null, diagnostics.all)
-            }
-
+            model(document, diagnostics) ?: return ValidationResult(null, diagnostics.all)
         val sources = Sources.load(contract, document, diagnostics, remote)
         val context = CheckContext(contract, document, sources, diagnostics)
         checks.forEach { it.run(context) }
 
         return ValidationResult(contract, diagnostics.all)
     }
+
+    /**
+     * The model of a contract that is valid against the JSON Schema, which it should always fit. When it does not,
+     * that is a gap between the schema and the model: reported as K002 at the root, so the caller gets a finding, not
+     * a crash.
+     */
+    internal fun model(
+        document: LocatedDocument,
+        diagnostics: Diagnostics,
+    ): Contract? =
+        try {
+            ContractMapper.json.treeToValue<Contract>(document.root)
+        } catch (e: Exception) {
+            diagnostics.error(
+                Code.SCHEMA,
+                "the contract passes the JSON Schema but does not fit the contract model: ${e.message}",
+                document.locate(""),
+            )
+            null
+        }
 }
