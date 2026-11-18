@@ -212,7 +212,7 @@ class CommandsTest {
         val json = ContractMapper.json.readTree(out)
         assertThat(json.path("valid").asBoolean()).isFalse()
         assertThat(
-            json.at("/contracts/0/diagnostics").map { it.path("code").asText() },
+            json.at("/contracts/0/diagnostics").values().map { it.path("code").asString() },
         ).containsExactly("RIALTO-K010")
 
         val (update, _, err) = run("sources", "update", contract)

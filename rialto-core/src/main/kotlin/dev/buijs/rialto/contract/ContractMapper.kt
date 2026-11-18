@@ -14,30 +14,50 @@
 package dev.buijs.rialto.contract
 
 import com.fasterxml.jackson.annotation.JsonInclude
-import com.fasterxml.jackson.databind.DeserializationFeature
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.SerializationFeature
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
-import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator
-import com.fasterxml.jackson.module.kotlin.jacksonMapperBuilder
-import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import tools.jackson.databind.DeserializationFeature
+import tools.jackson.databind.MapperFeature
+import tools.jackson.databind.ObjectMapper
+import tools.jackson.databind.SerializationFeature
+import tools.jackson.databind.json.JsonMapper
+import tools.jackson.dataformat.yaml.YAMLFactory
+import tools.jackson.dataformat.yaml.YAMLMapper
+import tools.jackson.dataformat.yaml.YAMLReadFeature
+import tools.jackson.dataformat.yaml.YAMLSchema
+import tools.jackson.dataformat.yaml.YAMLWriteFeature
+import tools.jackson.module.kotlin.kotlinModule
 
 /** The Jackson mappers between documents and the [Contract] model. */
 object ContractMapper {
-    /** Reads trees into the model; unknown keys (extensions) are left out of the model. */
-    val json: ObjectMapper =
-        jacksonMapperBuilder()
-            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+    /**
+     * YAML 1.2 with its core schema, as rialto-dart reads it: `~` and `Null` are null, `yes` is a string, `0444` is
+     * 444 and `0o14` is 12.
+     */
+    val yamlFactory: YAMLFactory =
+        YAMLFactory
+            .builder()
+            .yamlSchema(YAMLSchema.CORE)
+            .disable(YAMLReadFeature.PARSE_OCTAL_NUMBERS)
+            .disable(YAMLWriteFeature.WRITE_DOC_START_MARKER)
+            .enable(YAMLWriteFeature.MINIMIZE_QUOTES)
+            .enable(YAMLWriteFeature.ALWAYS_QUOTE_NUMBERS_AS_STRINGS)
             .build()
 
-    /** Writes the model as YAML, leaving out absent and empty values. */
+    /** Reads trees into the model; unknown keys (extensions) are left out of the model. */
+    val json: ObjectMapper =
+        JsonMapper
+            .builder()
+            .addModule(kotlinModule())
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            .disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
+            .build()
+
+    /** Writes the model as YAML, in declaration order, leaving out absent and empty values. */
     val yaml: ObjectMapper =
-        ObjectMapper(
-            YAMLFactory()
-                .disable(YAMLGenerator.Feature.WRITE_DOC_START_MARKER)
-                .enable(YAMLGenerator.Feature.MINIMIZE_QUOTES)
-                .enable(YAMLGenerator.Feature.ALWAYS_QUOTE_NUMBERS_AS_STRINGS),
-        ).registerKotlinModule()
-            .setDefaultPropertyInclusion(JsonInclude.Include.NON_EMPTY)
+        YAMLMapper
+            .builder(yamlFactory)
+            .addModule(kotlinModule())
+            .changeDefaultPropertyInclusion { it.withValueInclusion(JsonInclude.Include.NON_EMPTY) }
+            .disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
             .disable(SerializationFeature.FAIL_ON_EMPTY_BEANS)
+            .build()
 }

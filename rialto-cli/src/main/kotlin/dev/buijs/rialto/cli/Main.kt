@@ -13,7 +13,6 @@
 
 package dev.buijs.rialto.cli
 
-import com.fasterxml.jackson.databind.node.ObjectNode
 import dev.buijs.rialto.contract.ContractFiles
 import dev.buijs.rialto.contract.ContractMapper
 import dev.buijs.rialto.contract.ContractValidator
@@ -22,6 +21,7 @@ import dev.buijs.rialto.contract.Diagnostics
 import dev.buijs.rialto.contract.RemoteMode
 import dev.buijs.rialto.contract.RemoteSources
 import dev.buijs.rialto.contract.Severity
+import tools.jackson.databind.node.ObjectNode
 import java.io.PrintStream
 import java.nio.file.Path
 import kotlin.io.path.exists

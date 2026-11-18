@@ -13,7 +13,7 @@
 
 package dev.buijs.rialto.contract
 
-import com.fasterxml.jackson.databind.JsonNode
+import tools.jackson.databind.JsonNode
 import java.nio.channels.FileChannel
 import java.nio.channels.OverlappingFileLockException
 import java.nio.file.AtomicMoveNotSupportedException
@@ -92,9 +92,9 @@ class RialtoLock(
         if (!node.isObject) throw Unreadable("sources is not a mapping")
 
         return node.properties().associate { (url, hash) ->
-            if (!hash.isTextual) throw Unreadable("$url is not a URL with a hash")
+            if (!hash.isString) throw Unreadable("$url is not a URL with a hash")
 
-            url to hash.asText()
+            url to hash.asString()
         }
     }
 

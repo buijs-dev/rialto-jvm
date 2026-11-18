@@ -20,9 +20,9 @@ import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.annotation.JsonValue
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.module.kotlin.convertValue
-import com.fasterxml.jackson.module.kotlin.treeToValue
+import tools.jackson.databind.JsonNode
+import tools.jackson.module.kotlin.convertValue
+import tools.jackson.module.kotlin.treeToValue
 
 /**
  * A Rialto contract (contract format 1.0.0). The model mirrors the document one to one; the
@@ -270,17 +270,17 @@ data class TransitionRef(
         @JvmStatic
         @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun of(node: JsonNode): TransitionRef =
-            if (node.isTextual) {
-                TransitionRef(rule = node.asText())
+            if (node.isString) {
+                TransitionRef(rule = node.asString())
             } else {
                 TransitionRef(
-                    select = node.path("select").takeIf { it.isTextual }?.asText(),
+                    select = node.path("select").takeIf { it.isString }?.asString(),
                     rules =
                         node
                             .path("rules")
-                            .fields()
+                            .properties()
                             .asSequence()
-                            .associate { (value, rule) -> value to rule.asText() },
+                            .associate { (value, rule) -> value to rule.asString() },
                 )
             }
     }
@@ -343,15 +343,17 @@ sealed class TypeDecl {
                 val properties = node.path("properties")
                 val paths =
                     if (properties.isArray) {
-                        properties.associate { it.asText() to it.asText() }
+                        properties.associate { it.asString() to it.asString() }
                     } else {
-                        properties.properties().associate { (name, path) -> name to path.asText() }
+                        properties.properties().associate { (name, path) ->
+                            name to path.asString()
+                        }
                     }
 
                 return Projection(
-                    source = node.path("source").asText(),
+                    source = node.path("source").asString(),
                     paths = paths,
-                    description = node.path("description").takeIf { it.isTextual }?.asText(),
+                    description = node.path("description").takeIf { it.isString }?.asString(),
                     listed = properties.isArray,
                 )
             }
@@ -363,11 +365,11 @@ sealed class TypeDecl {
         @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun of(node: JsonNode): TypeDecl {
             val fields =
-                (node as com.fasterxml.jackson.databind.node.ObjectNode).deepCopy().apply {
+                (node as tools.jackson.databind.node.ObjectNode).deepCopy().apply {
                     remove("kind")
                 }
 
-            return when (val kind = node.path("kind").asText()) {
+            return when (val kind = node.path("kind").asString()) {
                 "entity" -> ContractMapper.json.treeToValue<Entity>(fields)
                 "value" -> ContractMapper.json.treeToValue<Value>(fields)
                 "enum" -> ContractMapper.json.treeToValue<Enum>(fields)
@@ -430,7 +432,7 @@ enum class As(
         fun of(node: JsonNode): As {
             // The schema allows only the list of both forms, in either order.
             if (node.isArray) return IDENTITY_OR_COMMAND
-            return entries.first { it.label == node.asText() }
+            return entries.first { it.label == node.asString() }
         }
     }
 }
@@ -615,9 +617,9 @@ sealed class RestRef {
         @JvmStatic
         @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun of(node: JsonNode): RestRef =
-            if (node.isTextual) {
+            if (node.isString) {
                 Single(
-                    node.asText(),
+                    node.asString(),
                 )
             } else {
                 PerSource(ContractMapper.json.convertValue(node))
@@ -737,12 +739,12 @@ data class Subject(
         @JvmStatic
         @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun of(node: JsonNode): Subject =
-            if (node.isTextual) {
-                Subject(node.asText())
+            if (node.isString) {
+                Subject(node.asString())
             } else {
                 Subject(
-                    node.path("type").asText(),
-                    node.path("by").takeIf { it.isTextual }?.asText(),
+                    node.path("type").asString(),
+                    node.path("by").takeIf { it.isString }?.asString(),
                 )
             }
     }
@@ -858,12 +860,12 @@ data class Tiebreaker(
         @JvmStatic
         @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun of(node: JsonNode): Tiebreaker =
-            if (node.isTextual) {
-                Tiebreaker(node.asText())
+            if (node.isString) {
+                Tiebreaker(node.asString())
             } else {
                 Tiebreaker(
-                    node.path("field").asText(),
-                    node.path("direction").takeIf { it.isTextual }?.asText(),
+                    node.path("field").asString(),
+                    node.path("direction").takeIf { it.isString }?.asString(),
                 )
             }
     }
@@ -961,10 +963,10 @@ sealed class PropertyFrom {
         @JvmStatic
         @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun of(node: JsonNode): PropertyFrom =
-            if (node.isTextual) {
-                Path(node.asText())
+            if (node.isString) {
+                Path(node.asString())
             } else {
-                Forms(node.path("identity").asText(), node.path("command").asText())
+                Forms(node.path("identity").asString(), node.path("command").asString())
             }
     }
 }
@@ -1031,22 +1033,22 @@ sealed class ColumnRef {
         @JvmStatic
         @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun of(node: JsonNode): ColumnRef =
-            if (node.isTextual) {
+            if (node.isString) {
                 Plain(
-                    node.asText(),
+                    node.asString(),
                 )
             } else if (node.path("join").isArray) {
                 JoinPath(
-                    node.path("join").map {
-                        JoinStep(it.path("column").asText(), it.path("table").asText())
+                    node.path("join").values().map {
+                        JoinStep(it.path("column").asString(), it.path("table").asString())
                     },
-                    node.path("key").asText(),
+                    node.path("key").asString(),
                 )
             } else {
                 Join(
-                    node.path("join").asText(),
-                    node.path("table").asText(),
-                    node.path("key").asText(),
+                    node.path("join").asString(),
+                    node.path("table").asString(),
+                    node.path("key").asString(),
                 )
             }
     }
@@ -1095,17 +1097,17 @@ sealed class DeleteMode {
         @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun of(node: JsonNode): DeleteMode =
             when {
-                node.isTextual && node.asText() == "physical" -> {
+                node.isString && node.asString() == "physical" -> {
                     Physical
                 }
-                node.isTextual -> {
+                node.isString -> {
                     None
                 }
                 else -> {
                     Soft(
-                        soft = node.path("soft").asText(),
+                        soft = node.path("soft").asString(),
                         restore = node.path("restore").asBoolean(false),
-                        by = node.path("by").takeIf { it.isTextual }?.asText(),
+                        by = node.path("by").takeIf { it.isString }?.asString(),
                     )
                 }
             }

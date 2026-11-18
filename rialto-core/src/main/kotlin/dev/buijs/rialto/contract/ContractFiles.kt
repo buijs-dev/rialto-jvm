@@ -12,14 +12,14 @@
  */
 package dev.buijs.rialto.contract
 
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.ArrayNode
-import com.fasterxml.jackson.databind.node.ObjectNode
-import com.networknt.schema.JsonSchema
-import com.networknt.schema.JsonSchemaFactory
-import com.networknt.schema.PathType
-import com.networknt.schema.SchemaValidatorsConfig
-import com.networknt.schema.SpecVersion
+import com.networknt.schema.Schema
+import com.networknt.schema.SchemaRegistry
+import com.networknt.schema.SchemaRegistryConfig
+import com.networknt.schema.SpecificationVersion
+import com.networknt.schema.path.PathType
+import tools.jackson.databind.JsonNode
+import tools.jackson.databind.node.ArrayNode
+import tools.jackson.databind.node.ObjectNode
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.isRegularFile
@@ -55,40 +55,39 @@ object ContractFiles {
         }.use { ContractMapper.json.readTree(it) }
     }
 
-    private val schemaConfig: SchemaValidatorsConfig =
-        SchemaValidatorsConfig
-            .builder()
-            .formatAssertionsEnabled(true)
-            .pathType(PathType.JSON_POINTER)
-            .build()
+    /** The JSON Schema dialect of the contract schema (2020-12), with format assertions and JSON Pointer locations. */
+    internal val schemaRegistry: SchemaRegistry =
+        SchemaRegistry.withDefaultDialect(SpecificationVersion.DRAFT_2020_12) {
+            it.schemaRegistryConfig(
+                SchemaRegistryConfig
+                    .builder()
+                    .formatAssertionsEnabled(true)
+                    .pathType(PathType.JSON_POINTER)
+                    .build(),
+            )
+        }
 
     /** The schema of the root's `include` (K5.2). */
-    private val includeSchema: JsonSchema by lazy {
+    private val includeSchema: Schema by lazy {
         val include =
-            contractSchema.path("properties").path("include").deepCopy<ObjectNode>().apply {
-                put("\$schema", contractSchema.path("\$schema").asText())
+            (contractSchema.path("properties").path("include") as ObjectNode).deepCopy().apply {
+                put("\$schema", contractSchema.path("\$schema").asString())
             }
 
-        JsonSchemaFactory
-            .getInstance(
-                SpecVersion.VersionFlag.V202012,
-            ).getSchema(include, schemaConfig)
+        schemaRegistry.getSchema(include)
     }
 
-    private val fragmentSchema: JsonSchema by lazy {
+    private val fragmentSchema: Schema by lazy {
         val schema = contractSchema
 
         val fragment =
             ContractMapper.json.createObjectNode().apply {
-                set<JsonNode>("\$defs", schema.get("\$defs"))
-                set<JsonNode>("properties", schema.get("properties"))
+                set("\$defs", schema.get("\$defs"))
+                set("properties", schema.get("properties"))
                 put("\$ref", "#/\$defs/fragment")
             }
 
-        JsonSchemaFactory
-            .getInstance(
-                SpecVersion.VersionFlag.V202012,
-            ).getSchema(fragment, schemaConfig)
+        schemaRegistry.getSchema(fragment)
     }
 
     /**
@@ -113,7 +112,7 @@ object ContractFiles {
         invalid.forEach { message ->
             diagnostics.error(
                 Code.SCHEMA,
-                message.message.substringAfter(": ", message.message),
+                message.message,
                 document.locate("/include" + pointer(message.instanceLocation.toString())),
             )
         }
@@ -147,7 +146,7 @@ object ContractFiles {
         val from = root.toAbsolutePath().normalize().parent
         val bundled = (document.root as ObjectNode).deepCopy()
         bundled.path("sources").forEach { source ->
-            val path = source.path("path").asText()
+            val path = source.path("path").asString()
             if (source is ObjectNode && path.isNotEmpty() && !RemoteSources.isRemote(path)) {
                 source.put(
                     "path",
@@ -178,13 +177,13 @@ object ContractFiles {
 
         val matched = sortedSetOf<String>()
         include.forEachIndexed { index, pattern ->
-            val regex = glob(pattern.asText())
+            val regex = glob(pattern.asString())
             val found = candidates.filter { regex.matches(it) }
 
             if (found.isEmpty()) {
                 diagnostics.error(
                     Code.INCLUDE_NO_MATCH,
-                    "include '${pattern.asText()}' matches no file",
+                    "include '${pattern.asString()}' matches no file",
                     document.locate("/include/$index"),
                 )
             }
@@ -242,9 +241,9 @@ object ContractFiles {
         private val owner = mutableMapOf<String, Path>()
 
         init {
-            merged.fieldNames().forEach { key ->
+            merged.propertyNames().forEach { key ->
                 if (key in keyed) {
-                    merged.get(key).fieldNames().forEach { owner["$key/$it"] = root.file }
+                    merged.get(key).propertyNames().forEach { owner["$key/$it"] = root.file }
                 } else if (key != "mappings") {
                     owner[key] = root.file
                 }
@@ -267,8 +266,8 @@ object ContractFiles {
                     return
                 }
 
-            val version = fragment.root.path("rialto").asText("")
-            val expected = root.root.path("rialto").asText("")
+            val version = fragment.root.path("rialto").asString("")
+            val expected = root.root.path("rialto").asString("")
             if (version != expected) {
                 diagnostics.error(
                     Code.UNSUPPORTED_VERSION,
@@ -280,7 +279,7 @@ object ContractFiles {
 
             val misplaced =
                 fragment.root
-                    .fieldNames()
+                    .propertyNames()
                     .asSequence()
                     .filter { it in rootOnly }
                     .toList()
@@ -297,13 +296,13 @@ object ContractFiles {
             invalid.forEach { message ->
                 diagnostics.error(
                     Code.SCHEMA,
-                    message.message.substringAfter(": ", message.message),
+                    message.message,
                     fragment.locate(pointer(message.instanceLocation.toString())),
                 )
             }
 
             if (invalid.isNotEmpty()) return
-            fragment.root.fields().forEach { (key, value) ->
+            fragment.root.properties().forEach { (key, value) ->
                 when (key) {
                     "rialto" -> Unit
                     in keyed -> section(fragment, key, value, diagnostics)
@@ -322,7 +321,7 @@ object ContractFiles {
             diagnostics: Diagnostics,
         ) {
             val section = merged.get(key) as? ObjectNode ?: merged.putObject(key)
-            value.fields().forEach { (name, element) ->
+            value.properties().forEach { (name, element) ->
                 val pointer = "/$key/${LocatedDocument.segment(name)}"
                 val previous = owner["$key/$name"]
                 if (previous != null) {
@@ -335,7 +334,7 @@ object ContractFiles {
                 }
 
                 owner["$key/$name"] = fragment.file
-                section.set<JsonNode>(name, element)
+                section.set(name, element)
                 copy(fragment, pointer, pointer)
             }
         }
@@ -369,7 +368,7 @@ object ContractFiles {
             }
 
             owner[key] = fragment.file
-            merged.set<JsonNode>(key, value)
+            merged.set(key, value)
             copy(fragment, pointer, pointer)
         }
 

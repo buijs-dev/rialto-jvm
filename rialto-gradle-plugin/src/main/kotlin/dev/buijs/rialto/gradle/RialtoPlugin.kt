@@ -43,7 +43,7 @@ class RialtoPlugin : Plugin<Project> {
                     listOf(file, file.parentFile.resolve(RemoteSources.LOCK_FILE)) +
                         ContractFiles.fragments(file.toPath()).map { it.toFile() } +
                         sources
-                            .mapNotNull { it.get("path")?.asText() }
+                            .mapNotNull { it.get("path")?.asString() }
                             .filterNot(RemoteSources::isRemote)
                             .flatMap { path ->
                                 // A migrations glob (K1.9) tracks every file it matches.

@@ -13,13 +13,13 @@
 
 package dev.buijs.rialto.contract
 
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.ArrayNode
-import com.fasterxml.jackson.databind.node.ObjectNode
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.TestFactory
 import org.junit.jupiter.api.io.TempDir
+import tools.jackson.databind.JsonNode
+import tools.jackson.databind.node.ArrayNode
+import tools.jackson.databind.node.ObjectNode
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.writeText
@@ -324,7 +324,7 @@ class FormatChecksTest {
         val parent = root.at(pointer.substringBeforeLast('/'))
         val key = pointer.substringAfterLast('/').replace("~1", "/").replace("~0", "~")
         when (parent) {
-            is ObjectNode -> parent.set<JsonNode>(key, value)
+            is ObjectNode -> parent.set(key, value)
             is ArrayNode -> parent.set(key.toInt(), value)
             else -> error("No parent for $pointer")
         }

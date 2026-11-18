@@ -13,14 +13,13 @@
 
 package dev.buijs.rialto.contract
 
-import com.fasterxml.jackson.core.JsonFactory
-import com.fasterxml.jackson.core.JsonParser
-import com.fasterxml.jackson.core.JsonToken
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.ArrayNode
-import com.fasterxml.jackson.databind.node.JsonNodeFactory
-import com.fasterxml.jackson.databind.node.ObjectNode
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
+import tools.jackson.core.JsonParser
+import tools.jackson.core.JsonToken
+import tools.jackson.core.json.JsonFactory
+import tools.jackson.databind.JsonNode
+import tools.jackson.databind.node.ArrayNode
+import tools.jackson.databind.node.JsonNodeFactory
+import tools.jackson.databind.node.ObjectNode
 import java.nio.file.Path
 import kotlin.io.path.extension
 import kotlin.io.path.readText
@@ -81,7 +80,7 @@ class LocatedDocument internal constructor(
                 if (file.extension.equals("json", ignoreCase = true)) {
                     JsonFactory()
                 } else {
-                    YAMLFactory()
+                    ContractMapper.yamlFactory
                 }
 
             factory.createParser(text).use { parser ->
@@ -125,7 +124,7 @@ class LocatedDocument internal constructor(
             return when (parser.currentToken()) {
                 JsonToken.START_OBJECT -> readObject(parser, pointer, positions)
                 JsonToken.START_ARRAY -> readArray(parser, pointer, positions)
-                JsonToken.VALUE_STRING -> nodes.textNode(parser.text)
+                JsonToken.VALUE_STRING -> nodes.stringNode(parser.text)
                 JsonToken.VALUE_NUMBER_INT -> nodes.numberNode(parser.bigIntegerValue)
                 JsonToken.VALUE_NUMBER_FLOAT -> nodes.numberNode(parser.decimalValue)
                 JsonToken.VALUE_TRUE -> nodes.booleanNode(true)
@@ -140,13 +139,13 @@ class LocatedDocument internal constructor(
             positions: MutableMap<String, Pair<Int, Int>>,
         ): ObjectNode {
             val node = nodes.objectNode()
-            while (parser.nextToken() == JsonToken.FIELD_NAME) {
+            while (parser.nextToken() == JsonToken.PROPERTY_NAME) {
                 val name = parser.currentName()
                 val child = "$pointer/${segment(name)}"
                 val location = parser.currentTokenLocation()
                 positions[child] = location.lineNr to location.columnNr
                 parser.nextToken()
-                node.set<JsonNode>(name, readValue(parser, child, positions))
+                node.set(name, readValue(parser, child, positions))
             }
 
             return node

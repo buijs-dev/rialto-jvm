@@ -63,13 +63,13 @@ class JsonFormatTest {
                 .path("contracts")
                 .single()
                 .path("diagnostics")
-                .first { it.path("code").asText() == "RIALTO-K004" }
+                .first { it.path("code").asString() == "RIALTO-K004" }
 
         assertThat(code).isEqualTo(1)
-        assertThat(diagnostic.path("severity").asText()).isEqualTo("error")
-        assertThat(diagnostic.path("requirement").asText()).isEqualTo("K1.2")
+        assertThat(diagnostic.path("severity").asString()).isEqualTo("error")
+        assertThat(diagnostic.path("requirement").asString()).isEqualTo("K1.2")
         assertThat(diagnostic.path("line").asInt()).isPositive()
-        assertThat(diagnostic.path("pointer").asText()).startsWith("/")
+        assertThat(diagnostic.path("pointer").asString()).startsWith("/")
     }
 
     @Test
@@ -93,12 +93,12 @@ class JsonFormatTest {
         assertThat(code).isEqualTo(1)
         assertThat(json.path("valid").asBoolean()).isFalse()
         assertThat(json.at("/contracts/0/valid").asBoolean()).isTrue()
-        assertThat(json.at("/contracts/1/file").asText()).isEqualTo("missing.rialto.yaml")
+        assertThat(json.at("/contracts/1/file").asString()).isEqualTo("missing.rialto.yaml")
         assertThat(json.at("/contracts/1/valid").asBoolean()).isFalse()
         val diagnostic = json.at("/contracts/1/diagnostics/0")
-        assertThat(diagnostic.path("severity").asText()).isEqualTo("error")
+        assertThat(diagnostic.path("severity").asString()).isEqualTo("error")
         assertThat(diagnostic.path("code").isNull).isTrue()
-        assertThat(diagnostic.path("message").asText()).isEqualTo("missing.rialto.yaml not found")
+        assertThat(diagnostic.path("message").asString()).isEqualTo("missing.rialto.yaml not found")
     }
 
     @Test
@@ -106,7 +106,7 @@ class JsonFormatTest {
         val file = contracts.resolve("invalid/not-a-mapping.yaml")
         val (_, output) = run("validate", "--format", "json", file.toString())
         val diagnostic = ContractMapper.json.readTree(output).at("/contracts/0/diagnostics/0")
-        assertThat(diagnostic.fieldNames().asSequence().toList())
+        assertThat(diagnostic.propertyNames().asSequence().toList())
             .containsExactly(
                 "severity",
                 "code",
@@ -118,7 +118,7 @@ class JsonFormatTest {
                 "message",
                 "hint",
             )
-        assertThat(diagnostic.path("code").asText()).isEqualTo("RIALTO-K001")
+        assertThat(diagnostic.path("code").asString()).isEqualTo("RIALTO-K001")
         assertThat(diagnostic.path("line").isNull).isTrue()
         assertThat(diagnostic.path("hint").isNull).isTrue()
     }

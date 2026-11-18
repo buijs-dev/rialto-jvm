@@ -71,20 +71,23 @@ class IncludeTest {
         assertThat(diagnostics.all).isEmpty()
         assertThat(
             document.root
-                .fieldNames()
+                .propertyNames()
                 .asSequence()
                 .toList(),
         ).containsExactly("rialto", "info", "types", "mappings")
         assertThat(
             document.root
                 .path("types")
-                .fieldNames()
+                .propertyNames()
                 .asSequence()
                 .toList(),
         ).containsExactly("Thing", "Size")
         // parts/c sorts before parts/deeper/b.
         assertThat(
-            document.root.path("mappings").map { it.path("direction").asText() },
+            document.root
+                .path("mappings")
+                .values()
+                .map { it.path("direction").asString() },
         ).containsExactly("both", "toTarget")
         val mapping = document.locate("/mappings/1/direction")
         assertThat(mapping.file.fileName.toString()).isEqualTo("b.rialto.yaml")
@@ -307,13 +310,13 @@ class IncludeTest {
         assertThat(
             bundled
                 .path("types")
-                .fieldNames()
+                .propertyNames()
                 .asSequence()
                 .toList(),
         ).containsExactly("Thing")
-        assertThat(bundled.at("/sources/api/path").asText()).isEqualTo("../../api.json")
+        assertThat(bundled.at("/sources/api/path").asString()).isEqualTo("../../api.json")
         assertThat(
-            bundled.at("/sources/remote/path").asText(),
+            bundled.at("/sources/remote/path").asString(),
         ).isEqualTo("https://x.example/api.json")
     }
 

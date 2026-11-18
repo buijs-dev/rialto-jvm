@@ -39,7 +39,7 @@ class LoadingTest {
     fun `YAML keeps the line and column of every key and list element`() {
         val file = Path.of("doc.yaml")
         val document = LocatedDocument.parse(file, "a:\n  b: [x, y]\n  \"c/d~e\": 1\n")
-        assertThat(document.at("/a/b/1")!!.asText()).isEqualTo("y")
+        assertThat(document.at("/a/b/1")!!.asString()).isEqualTo("y")
         assertThat(document.positions[""]).isEqualTo(Position(file, 1, 1))
         assertThat(document.positions["/a"]).isEqualTo(Position(file, 1, 1))
         assertThat(document.positions["/a/b"]).isEqualTo(Position(file, 2, 3))
@@ -56,7 +56,7 @@ class LoadingTest {
                     "  \"n\": 12345678901234567890, \"f\": 1.5, \"t\": true, \"no\": false, \"z\": null\n}\n",
             )
         val document = LocatedDocument.read(file)
-        assertThat(document.at("/types/A/members/0")!!.asText()).isEqualTo("a")
+        assertThat(document.at("/types/A/members/0")!!.asString()).isEqualTo("a")
         assertThat(document.locate("/types/A").line).isEqualTo(3)
         assertThat(document.locate("/types/A").column).isEqualTo(5)
         assertThat(
@@ -69,6 +69,28 @@ class LoadingTest {
         assertThat(document.at("/missing")).isNull()
         assertThat(document.at("types/A")).isNull()
         assertThat(document.at("")).isEqualTo(document.root)
+    }
+
+    @Test
+    fun `YAML is read as YAML 1_2 with the core schema, as rialto-dart reads it`() {
+        val document =
+            LocatedDocument.parse(
+                Path.of("doc.yaml"),
+                "tilde: ~\nnull: Null\nyes: yes\nno: no\ntrue: True\n" +
+                    "zero: 0444\noctal: 0o14\nhex: 0x1F\nunder: 1_000\nplus: +12\nquoted: '~'\n",
+            )
+
+        assertThat(document.at("/tilde")!!.isNull).isTrue()
+        assertThat(document.at("/null")!!.isNull).isTrue()
+        assertThat(document.at("/yes")!!.stringValue()).isEqualTo("yes")
+        assertThat(document.at("/no")!!.stringValue()).isEqualTo("no")
+        assertThat(document.at("/true")!!.booleanValue()).isTrue()
+        assertThat(document.at("/zero")!!.intValue()).isEqualTo(444)
+        assertThat(document.at("/octal")!!.intValue()).isEqualTo(12)
+        assertThat(document.at("/hex")!!.intValue()).isEqualTo(31)
+        assertThat(document.at("/under")!!.stringValue()).isEqualTo("1_000")
+        assertThat(document.at("/plus")!!.intValue()).isEqualTo(12)
+        assertThat(document.at("/quoted")!!.stringValue()).isEqualTo("~")
     }
 
     @Test
@@ -182,8 +204,9 @@ class LoadingTest {
         assertThat(diagnostic.code).isEqualTo(Code.SCHEMA)
         assertThat(diagnostic.location).isEqualTo(Location(file, 1, 1, ""))
         assertThat(diagnostic.message)
-            .startsWith("the contract passes the JSON Schema but does not fit the contract model")
-            .contains("maxLength")
+            .startsWith(
+                "the contract passes the JSON Schema but does not fit the contract model at /types/T: ",
+            ).contains("maxLength")
     }
 
     @Test

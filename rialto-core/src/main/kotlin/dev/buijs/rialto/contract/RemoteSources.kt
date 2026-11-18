@@ -83,8 +83,8 @@ object RemoteSources {
             }
 
         val session = Session(contractFile, RemoteMode.UPDATE, diagnostics)
-        document.root.path("sources").fields().forEach { (name, source) ->
-            val path = source.path("path").asText()
+        document.root.path("sources").properties().forEach { (name, source) ->
+            val path = source.path("path").asString()
             if (isRemote(path)) {
                 session.resolve(
                     path,
@@ -252,7 +252,7 @@ object RemoteSources {
             } catch (e: RialtoLock.Unreadable) {
                 unreadable = e.message
                 null
-            } catch (e: com.fasterxml.jackson.core.JsonProcessingException) {
+            } catch (e: tools.jackson.core.JacksonException) {
                 unreadable = "not valid YAML: ${e.originalMessage}"
                 null
             } catch (e: java.io.IOException) {

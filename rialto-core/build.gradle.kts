@@ -5,7 +5,7 @@ plugins {
 description = "Rialto tooling: the contract model, loading, bundling and validation of contracts"
 
 dependencies {
-    // Exposed: the contract model and diagnostics carry Jackson nodes.
+    // Exposed: the contract model and diagnostics carry Jackson 3 nodes.
     api(libs.jackson.databind)
     implementation(libs.jackson.dataformat.yaml)
     implementation(libs.jackson.module.kotlin)

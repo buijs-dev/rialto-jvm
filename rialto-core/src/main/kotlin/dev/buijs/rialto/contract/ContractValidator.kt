@@ -13,12 +13,10 @@
 
 package dev.buijs.rialto.contract
 
-import com.fasterxml.jackson.module.kotlin.treeToValue
-import com.networknt.schema.JsonSchema
-import com.networknt.schema.JsonSchemaFactory
-import com.networknt.schema.PathType
-import com.networknt.schema.SchemaValidatorsConfig
-import com.networknt.schema.SpecVersion
+import com.networknt.schema.Schema
+import tools.jackson.core.JacksonException
+import tools.jackson.databind.DatabindException
+import tools.jackson.module.kotlin.treeToValue
 import java.nio.file.Path
 
 /** The outcome of validating one contract: the model when it is usable, and every finding. */
@@ -45,24 +43,13 @@ object ContractValidator {
             FormatChecks,
         )
 
-    private val schema: JsonSchema by lazy {
-        val config =
-            SchemaValidatorsConfig
-                .builder()
-                .formatAssertionsEnabled(true)
-                .pathType(PathType.JSON_POINTER)
-                .build()
+    private val schema: Schema by lazy {
         val stream =
             requireNotNull(javaClass.getResourceAsStream("contract-1.0.0.schema.json")) {
                 "Schema resource missing"
             }
 
-        stream.use {
-            JsonSchemaFactory
-                .getInstance(
-                    SpecVersion.VersionFlag.V202012,
-                ).getSchema(it, config)
-        }
+        stream.use { ContractFiles.schemaRegistry.getSchema(it) }
     }
 
     fun validate(
@@ -75,7 +62,7 @@ object ContractValidator {
             ContractFiles.read(file, diagnostics) ?: return ValidationResult(null, diagnostics.all)
         if (diagnostics.hasErrors) return ValidationResult(null, diagnostics.all)
 
-        val version = document.root.path("rialto").asText("")
+        val version = document.root.path("rialto").asString("")
         if (version != SUPPORTED_VERSION) {
             diagnostics.error(
                 Code.UNSUPPORTED_VERSION,
@@ -101,7 +88,7 @@ object ContractValidator {
 
                 diagnostics.error(
                     Code.SCHEMA,
-                    message.message.substringAfter(": ", message.message),
+                    message.message,
                     document.locate(pointer),
                 )
             }
@@ -131,9 +118,29 @@ object ContractValidator {
         } catch (e: Exception) {
             diagnostics.error(
                 Code.SCHEMA,
-                "the contract passes the JSON Schema but does not fit the contract model: ${e.message}",
+                "the contract passes the JSON Schema but does not fit the contract model${misfit(
+                    e,
+                )}",
                 document.locate(""),
             )
             null
         }
+
+    /**
+     * Where and why the model rejects a document: the path of [e], then the deepest Jackson cause, which a type
+     * that reads its own node (a delegating creator) throws with the rest of the path.
+     */
+    private fun misfit(e: Exception): String {
+        val at =
+            (e as? DatabindException)?.path.orEmpty().joinToString("") {
+                "/" +
+                    (it.propertyName ?: it.index)
+            }
+
+        val cause =
+            generateSequence<Throwable>(
+                e,
+            ) { it.cause }.filterIsInstance<JacksonException>().lastOrNull() ?: e
+        return (if (at.isEmpty()) "" else " at $at") + ": " + cause.message
+    }
 }

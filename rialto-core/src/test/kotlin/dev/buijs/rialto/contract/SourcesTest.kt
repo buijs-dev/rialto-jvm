@@ -90,7 +90,7 @@ class SourcesTest {
                 Diagnostics(),
             )
         assertThat(
-            document.element("api#/components/schemas/Thing")!!.path("type").asText(),
+            document.element("api#/components/schemas/Thing")!!.path("type").asString(),
         ).isEqualTo("object")
         assertThat(document.element("db#thing")).isNull()
         assertThat(document.table("api#thing")).isNull()

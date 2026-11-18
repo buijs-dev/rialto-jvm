@@ -13,12 +13,12 @@
 
 package dev.buijs.rialto.contract
 
-import com.fasterxml.jackson.databind.node.ObjectNode
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 import org.junit.jupiter.api.io.TempDir
+import tools.jackson.databind.node.ObjectNode
 import java.nio.file.Path
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
@@ -91,15 +91,13 @@ class ContractValidatorTest {
         assertThat(ContractValidator.validate(split).diagnostics).isEmpty()
 
         val bundled =
-            ContractFiles.read(split, Diagnostics())!!.root.deepCopy<ObjectNode>().apply {
+            (ContractFiles.read(split, Diagnostics())!!.root as ObjectNode).deepCopy().apply {
                 remove("sources")
             }
 
         val single =
-            LocatedDocument
-                .read(shipment.resolve("shipment.rialto.yaml"))
-                .root
-                .deepCopy<ObjectNode>()
+            (LocatedDocument.read(shipment.resolve("shipment.rialto.yaml")).root as ObjectNode)
+                .deepCopy()
                 .apply { remove("sources") }
 
         assertThat(bundled).isEqualTo(single)
