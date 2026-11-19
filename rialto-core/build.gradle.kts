@@ -23,3 +23,15 @@ tasks.test {
     inputs.dir(spec.resolve("examples")).withPropertyName("specExamples")
     inputs.file(spec.resolve("spec/contract-1.0.0.schema.json")).withPropertyName("specSchema")
 }
+
+kover {
+    reports {
+        // Every line and branch is tested: a gap fails `check`.
+        verify {
+            rule {
+                minBound(100, kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE)
+                minBound(100, kotlinx.kover.gradle.plugin.dsl.CoverageUnit.BRANCH)
+            }
+        }
+    }
+}

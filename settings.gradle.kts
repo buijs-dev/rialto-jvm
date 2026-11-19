@@ -1,7 +1,6 @@
 pluginManagement {
     repositories {
         mavenLocal()
-        // The dev.buijs build tooling (convention and style plugins): releases and snapshots on Repsy.
         maven("https://repo.repsy.io/mvn/buijs-dev/maven")
         gradlePluginPortal()
         mavenCentral()

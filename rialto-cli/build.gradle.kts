@@ -29,3 +29,20 @@ application {
     applicationDefaultJvmArgs =
         applicationDefaultJvmArgs + listOf("-XX:TieredStopAtLevel=1", "-XX:+UseSerialGC")
 }
+
+kover {
+    reports {
+        filters {
+            // `main` only exits with the code of `run`, which the tests call in process; exiting would end the test JVM.
+            excludes { classes("dev.buijs.rialto.cli.MainKt") }
+        }
+
+        // Every line and branch is tested: a gap fails `check`.
+        verify {
+            rule {
+                minBound(100, kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE)
+                minBound(100, kotlinx.kover.gradle.plugin.dsl.CoverageUnit.BRANCH)
+            }
+        }
+    }
+}

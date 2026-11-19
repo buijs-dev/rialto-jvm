@@ -25,3 +25,15 @@ tasks.test {
     systemProperty("rialto.spec", rootDir.resolve("../rialto-spec").absolutePath)
     inputs.dir(rootDir.resolve("../rialto-spec/examples")).withPropertyName("specExamples")
 }
+
+kover {
+    reports {
+        // Every line and branch is tested: a gap fails `check`.
+        verify {
+            rule {
+                minBound(100, kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE)
+                minBound(100, kotlinx.kover.gradle.plugin.dsl.CoverageUnit.BRANCH)
+            }
+        }
+    }
+}
