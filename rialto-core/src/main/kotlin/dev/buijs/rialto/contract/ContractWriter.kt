@@ -17,10 +17,18 @@ import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.writeText
 
-/** Writes a [Contract] as a YAML document of the contract format. */
+/**
+ * Writes a [Contract] as a YAML document of the contract format: the way back from the model to a file.
+ *
+ * Validation reads documents into the model; this is its counterpart, for code that builds or changes a
+ * contract in memory and must hand it on as a document. Reading what it writes gives the same model again,
+ * top-level extension keys included; extension keys deeper in the document are not part of the model.
+ */
 object ContractWriter {
+    /** The YAML text of [contract], in declaration order, without absent and empty values. */
     fun write(contract: Contract): String = ContractMapper.yaml.writeValueAsString(contract)
 
+    /** Writes [contract] to [file], creating its directory when needed. */
     fun write(
         contract: Contract,
         file: Path,

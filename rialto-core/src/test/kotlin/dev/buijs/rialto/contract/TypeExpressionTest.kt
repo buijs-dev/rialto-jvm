@@ -17,6 +17,7 @@ import dev.buijs.rialto.contract.TypeExpression.ListOf
 import dev.buijs.rialto.contract.TypeExpression.MapOf
 import dev.buijs.rialto.contract.TypeExpression.Named
 import dev.buijs.rialto.contract.TypeExpression.Scalar
+import dev.buijs.rialto.contract.TypeExpression.SetOf
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -40,8 +41,41 @@ class TypeExpressionTest {
 
     @Test
     fun `rejects invalid expressions`() {
-        listOf("decimal(2,3)", "map<boolean, string>", "string?", "list<>", "shipment").forEach {
+        listOf(
+            "decimal(2,3)",
+            // More digits than an integer holds, which the JSON Schema allows.
+            "decimal(99999999999,2)",
+            "decimal(5,99999999999)",
+            "map<boolean, string>",
+            "string?",
+            "list<>",
+            "shipment",
+            "set<decimal(2,3)>",
+            "map<string>",
+            "map<nope, string>",
+            "map<string, nope>",
+            "list<nope?>",
+        ).forEach {
             assertThat(TypeExpression.parse(it)).describedAs(it).isNull()
         }
+    }
+
+    @Test
+    fun `parses sets and maps with nullable values, and names the types an expression refers to`() {
+        val map = TypeExpression.parse(" map<Status, Shipment?> ")
+
+        assertThat(
+            TypeExpression.parse("set<Tag>"),
+        ).isEqualTo(SetOf(Named("Tag"), nullableElements = false))
+        assertThat(map).isEqualTo(MapOf(Named("Status"), Named("Shipment"), nullableValues = true))
+        assertThat(map!!.names()).containsExactly("Status", "Shipment")
+        assertThat(TypeExpression.parse("list<Line>")!!.names()).containsExactly("Line")
+        assertThat(TypeExpression.parse("set<Tag>")!!.names()).containsExactly("Tag")
+        assertThat(Scalar("string").names()).isEmpty()
+    }
+
+    @Test
+    fun `only a decimal carries a precision and scale`() {
+        assertThat(Scalar("string")).matches { it.precision == null && it.scale == null }
     }
 }

@@ -13,12 +13,17 @@
 
 package dev.buijs.rialto.contract
 
-import java.nio.file.Files
+import tools.jackson.databind.JsonNode
+import java.math.BigInteger
 import java.nio.file.Path
 import kotlin.io.path.exists
 import kotlin.io.path.readText
 
-/** An external document the contract refers to. */
+/**
+ * An external document the contract refers to, loaded and ready to look into. A contract does not repeat what
+ * an OpenAPI, AsyncAPI or SQL schema already says; it points into it (`api#/paths/~1orders/get`,
+ * `db#orders.id`), and this is the form in which such a pointer is resolved.
+ */
 sealed class LoadedSource {
     abstract val name: String
     abstract val file: Path
@@ -35,187 +40,253 @@ sealed class LoadedSource {
         override val name: String,
         override val file: Path,
         val schema: Map<String, SqlTable>,
-    ) : LoadedSource() {
-        /** The column names per table. */
-        val tables: Map<String, Set<String>> get() = schema.mapValues { it.value.columns.keys }
+    ) : LoadedSource()
+}
+
+/**
+ * A reference into a source, `<source>#<location>`, taken apart once: the name under `sources` and the place in
+ * that source. For a SQL source the location is `table` or `table.column`, compared in lower case.
+ */
+internal data class ExternalRef(
+    val source: String,
+    val location: String,
+) {
+    /** The table of a SQL location. */
+    val table: String get() = location.substringBefore('.').lowercase()
+
+    /** The column of a SQL location, or null when it names only a table. */
+    val column: String? get() =
+        if ('.' in location) {
+            location.substringAfter('.').lowercase()
+        } else {
+            null
+        }
+
+    companion object {
+        fun of(reference: String): ExternalRef =
+            ExternalRef(reference.substringBefore('#'), reference.substringAfter('#'))
     }
 }
 
-/** The sources of one contract, and resolution of `<source>#<location>` references. */
+/**
+ * The sources of one contract, and resolution of `<source>#<location>` references.
+ *
+ * This is the bridge between the contract and the documents it builds on: [load] reads every source once, local
+ * or remote, and the checks then ask it whether a reference lands, or what is there (a SQL table, an OpenAPI
+ * element), without reading files themselves.
+ *
+ * Loading never fails as a whole. A source that cannot be read is left out and is a finding in [diagnostics]; the
+ * others are still loaded, so the checks can go on and one run shows the author every mistake.
+ *
+ * @property loaded the sources that could be read, by their name under `sources`; one that could not be read is
+ *   missing here and is a finding in [diagnostics]
+ * @property diagnostics what went wrong while loading, in the order of the sources; empty when every source was
+ *   loaded
+ */
 class Sources(
     val loaded: Map<String, LoadedSource>,
+    val diagnostics: List<Diagnostic>,
 ) {
     /** The result of resolving one reference. */
     sealed class Resolution {
+        /** The source has the location. */
         data object Resolved : Resolution()
 
+        /** The contract declares no source by that name. */
         data object UnknownSource : Resolution()
 
+        /** The source is declared but could not be loaded; that was reported already. */
         data object Unloaded : Resolution()
 
+        /** The source was loaded but has no such location. */
         data class Missing(
             val source: LoadedSource,
         ) : Resolution()
     }
 
+    /**
+     * Resolves [reference], `<source>#<location>`, against the sources [declared] by the contract. A document is
+     * addressed by JSON Pointer, a SQL schema by `table` or `table.column`, in any case.
+     */
     fun resolve(
         reference: String,
         declared: Set<String>,
     ): Resolution {
-        val name = reference.substringBefore('#')
-        val location = reference.substringAfter('#')
-        if (name !in declared) return Resolution.UnknownSource
-        val source = loaded[name] ?: return Resolution.Unloaded
+        val ref = ExternalRef.of(reference)
+        if (ref.source !in declared) {
+            return Resolution.UnknownSource
+        }
+
+        val source =
+            loaded[ref.source]
+                ?: return Resolution.Unloaded
+
         val found =
             when (source) {
                 is LoadedSource.Document -> {
-                    source.document.at(location) != null
+                    source.document.at(ref.location) != null
                 }
                 is LoadedSource.Sql -> {
-                    val table = source.tables[location.substringBefore('.').lowercase()]
-                    table != null &&
-                        (
-                            !location.contains('.') ||
-                                location.substringAfter('.').lowercase() in table
-                        )
+                    val columns = source.schema[ref.table]?.columns
+                    columns != null && (ref.column == null || ref.column in columns)
                 }
             }
 
-        return if (found) Resolution.Resolved else Resolution.Missing(source)
+        return if (found) {
+            Resolution.Resolved
+        } else {
+            Resolution.Missing(source)
+        }
     }
 
     /** The SQL table `<source>#<table>` refers to, or null. */
-    fun table(reference: String): SqlTable? =
-        (loaded[reference.substringBefore('#')] as? LoadedSource.Sql)
-            ?.schema
-            ?.get(reference.substringAfter('#').lowercase())
+    internal fun table(reference: String): SqlTable? {
+        val ref = ExternalRef.of(reference)
+        return (loaded[ref.source] as? LoadedSource.Sql)?.schema?.get(ref.table)
+    }
 
     /** The element a document reference points at, or null. */
-    fun element(reference: String) =
-        (
-            loaded[
-                reference.substringBefore(
-                    '#',
-                ),
-            ] as? LoadedSource.Document
-        )?.document?.at(reference.substringAfter('#'))
+    internal fun element(reference: String): JsonNode? {
+        val ref = ExternalRef.of(reference)
+        return (loaded[ref.source] as? LoadedSource.Document)?.document?.at(ref.location)
+    }
 
     companion object {
-        /** Loads every source of [contract], reporting the ones that cannot be read. */
+        /**
+         * Loads every source of [contract]. The ones that cannot be read are findings in [Sources.diagnostics],
+         * which the caller hands on. A local path is relative to the contract; an `https` path is read through
+         * [RemoteSources] in the given [remote] mode; a SQL path with `*` reads all migrations it matches as one
+         * schema.
+         */
         fun load(
             contract: Contract,
             contractDocument: LocatedDocument,
-            diagnostics: Diagnostics,
             remote: RemoteMode = RemoteMode.LOCKED,
         ): Sources {
-            val base = contractDocument.file.toAbsolutePath().parent
-            val loaded = mutableMapOf<String, LoadedSource>()
+            val diagnostics = Diagnostics()
             val session = RemoteSources.Session(contractDocument.file, remote, diagnostics)
+            val loader = SourceLoader(contractDocument, session, diagnostics)
+
+            val loaded = mutableMapOf<String, LoadedSource>()
             contract.sources.forEach { (name, source) ->
-                val pointer = "/sources/${LocatedDocument.segment(name)}/path"
-                if (source.kind == SourceKind.SQL && '*' in source.path) {
-                    // A service's migrations (K1.9): the schema is the result of all of them, in version order.
-                    val files = migrations(base, source.path)
-                    if (files.isEmpty()) {
-                        diagnostics.error(
-                            Code.SOURCE_UNREADABLE,
-                            "Source '$name' matches no migration: ${source.path}",
-                            contractDocument.locate(pointer),
-                        )
-                    } else {
-                        loaded[name] =
-                            LoadedSource.Sql(
-                                name,
-                                files.first().parent,
-                                // One statement never spans two files.
-                                SqlSchema.read(files.joinToString(";\n") { it.readText() }),
-                            )
-                    }
-
-                    return@forEach
-                }
-
-                val file =
-                    if (RemoteSources.isRemote(source.path)) {
-                        session.resolve(source.path, contractDocument.locate(pointer))
-                            ?: return@forEach
-                    } else {
-                        base.resolve(source.path).normalize()
-                    }
-
-                if (!file.exists()) {
-                    diagnostics.error(
-                        Code.SOURCE_UNREADABLE,
-                        "Source '$name' not found: ${source.path}",
-                        contractDocument.locate(pointer),
-                    )
-                    return@forEach
-                }
-
-                try {
-                    loaded[name] =
-                        when (source.kind) {
-                            SourceKind.SQL -> {
-                                LoadedSource.Sql(
-                                    name,
-                                    file,
-                                    SqlSchema.read(file.readText()),
-                                )
-                            }
-                            else -> {
-                                LoadedSource.Document(name, file, LocatedDocument.read(file))
-                            }
-                        }
-                } catch (e: Exception) {
-                    diagnostics.error(
-                        Code.SOURCE_UNREADABLE,
-                        "Source '$name' cannot be read: ${e.message}",
-                        contractDocument.locate(pointer),
-                    )
+                val loadedSource = loader.load(name, source)
+                if (loadedSource != null) {
+                    loaded[name] = loadedSource
                 }
             }
 
             session.finish()
-            return Sources(loaded)
+            return Sources(loaded, diagnostics.all)
         }
     }
 }
 
 /**
+ * Loads the sources of one contract, one at a time. A source that cannot be loaded is reported as
+ * `RIALTO-S001` at its `path` in the contract (a remote source by [session], with its own codes), and gives null.
+ */
+private class SourceLoader(
+    private val contractDocument: LocatedDocument,
+    private val session: RemoteSources.Session,
+    private val diagnostics: Diagnostics,
+) {
+    /** A local path is relative to the contract. */
+    private val base = contractDocument.file.toAbsolutePath().parent
+
+    fun load(
+        name: String,
+        source: Source,
+    ): LoadedSource? {
+        val location = contractDocument.locate("/${Keys.SOURCES}/${LocatedDocument.segment(name)}/${Keys.PATH}")
+        if (source.kind == SourceKind.SQL && '*' in source.path) {
+            return loadMigrations(name, source, location)
+        }
+
+        val file = fileOf(source, location) ?: return null
+        return loadFile(name, source, file, location)
+    }
+
+    /** A service's migrations (K1.9): the schema is the result of all of them, in version order. */
+    private fun loadMigrations(
+        name: String,
+        source: Source,
+        location: Location,
+    ): LoadedSource? {
+        val files = migrations(base, source.path)
+        if (files.isEmpty()) {
+            unreadable("Source '$name' matches no migration: ${source.path}", location)
+            return null
+        }
+
+        // One statement never spans two files.
+        val sql = files.joinToString(";\n") { it.readText() }
+
+        return LoadedSource.Sql(name, files.first().parent, SqlSchema.read(sql))
+    }
+
+    /** The file of [source]: the cached copy of a remote source, or the local file; null when a remote one failed. */
+    private fun fileOf(
+        source: Source,
+        location: Location,
+    ): Path? {
+        if (RemoteSources.isRemote(source.path)) {
+            return session.resolve(source.path, location)
+        }
+
+        return base.resolve(source.path).normalize()
+    }
+
+    private fun loadFile(
+        name: String,
+        source: Source,
+        file: Path,
+        location: Location,
+    ): LoadedSource? {
+        if (!file.exists()) {
+            unreadable("Source '$name' not found: ${source.path}", location)
+            return null
+        }
+
+        return try {
+            if (source.kind == SourceKind.SQL) {
+                LoadedSource.Sql(name, file, SqlSchema.read(file.readText()))
+            } else {
+                LoadedSource.Document(name, file, LocatedDocument.read(file))
+            }
+        } catch (e: Exception) {
+            unreadable("Source '$name' cannot be read: ${e.message}", location)
+            null
+        }
+    }
+
+    private fun unreadable(
+        message: String,
+        location: Location,
+    ) = diagnostics.error(Code.SOURCE_UNREADABLE, message, location)
+}
+
+/**
  * The files an SQL source path with `*` or `**` matches (K1.9), in version order: the number after a
- * leading `V` up to `__`, part by part; files without a version follow in code point order.
+ * leading `V` up to `__`, part by part; files without a version follow in code point order. A part is a number of
+ * any size, so a timestamp such as `V20261120120000` is a version too.
+ *
+ * This is the order a migration tool such as Flyway applies them, so the schema read is the one the database
+ * ends up with. The Gradle plugin also uses it to track every migration as an input of its tasks.
  */
 fun migrations(
     base: Path,
     path: String,
 ): List<Path> {
-    val segments = path.split('/')
-    val fixed = segments.takeWhile { '*' !in it }
-
-    val directory = base.resolve(fixed.joinToString("/")).normalize()
-    if (!Files.isDirectory(directory)) return emptyList()
-
-    val pattern = ContractFiles.glob(segments.drop(fixed.size).joinToString("/"))
-    val files =
-        Files.walk(directory).use { stream ->
-            stream
-                .filter {
-                    java.nio.file.Files
-                        .isRegularFile(it)
-                }.filter { pattern.matches(directory.relativize(it).joinToString("/")) }
-                .toList()
-        }
-
+    val files = Glob.files(base, path)
     val version = Regex("^V(\\d+(?:[._]\\d+)*)__")
 
-    fun versionOf(file: Path): List<Int>? =
+    fun versionOf(file: Path): List<BigInteger>? =
         version
-            .find(
-                file.fileName.toString(),
-            )?.groupValues
+            .find(file.fileName.toString())
+            ?.groupValues
             ?.get(1)
             ?.split('.', '_')
-            ?.map { it.toInt() }
+            ?.map { it.toBigInteger() }
 
     val comparator =
         Comparator<Path> { a, b ->

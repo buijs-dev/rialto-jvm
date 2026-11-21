@@ -13,18 +13,13 @@
 
 package dev.buijs.rialto.contract
 
+import java.io.IOException
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
-import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
-import java.security.MessageDigest
 import java.time.Duration
-import kotlin.io.path.createDirectories
-import kotlin.io.path.exists
-import kotlin.io.path.readBytes
 
 /** How remote sources are read (K4). */
 enum class RemoteMode {
@@ -43,61 +38,75 @@ data class SourceChange(
     val url: String,
     val before: String?,
     val after: String,
-)
+) {
+    /** As `rialto sources update` and `rialtoSourcesUpdate` report it: `<url>: <before or new> -> <after>`. */
+    override fun toString(): String = "$url: ${before ?: "new"} -> $after"
+
+    companion object {
+        /** The last line of an update that had no errors. */
+        fun summary(changes: List<SourceChange>): String =
+            "${changes.size} remote source(s) updated in ${RemoteSources.LOCK_FILE}"
+    }
+}
 
 /**
  * Remote sources (K4): documents at an `https` URL, pinned by SHA-256 in `rialto.lock` next to the
- * contract and kept in a content-addressed cache, `~/.cache/rialto/sha256/<hash>/<file name>`
- * (system property `rialto.cache` or environment variable `RIALTO_CACHE` move it).
+ * contract and kept by content in the [RialtoCache].
+ *
+ * A contract may build on an API another team publishes. Pinning its hash makes every build read exactly the
+ * version that was reviewed and committed: a change upstream fails the build (`RIALTO-S004`) until someone
+ * accepts it with [update], and a build without network can still run from the cache.
  */
 object RemoteSources {
+    /** The name of the lock file, next to the contract. */
     const val LOCK_FILE = "rialto.lock"
 
     /** Fetches the body of a URL; throws on a failure or a status other than 200. Replaceable in tests. */
     var fetch: (URI) -> ByteArray = ::httpFetch
 
+    /** Whether a source path is a URL rather than a local file; a URL that is not `https` is rejected later. */
     fun isRemote(path: String): Boolean = "://" in path
 
-    fun cacheDir(): Path =
-        Path.of(
-            System.getProperty("rialto.cache")
-                ?: System.getenv("RIALTO_CACHE")
-                ?: Path.of(System.getProperty("user.home"), ".cache", "rialto").toString(),
-        )
-
-    /** Fetches every remote source of [contractFile] and locks its current hash; returns what changed. */
-    fun update(
-        contractFile: Path,
-        diagnostics: Diagnostics,
-    ): List<SourceChange> {
+    /**
+     * Fetches every remote source of [contractFile] and locks its current hash; returns what changed. This is
+     * `rialto sources update` and `rialtoSourcesUpdate`: the deliberate step that accepts a new upstream version.
+     * It is [Outcome.Nok] when the contract cannot be read, a source cannot be fetched, or the lock cannot be
+     * read or written; then the lock is left as it was.
+     */
+    fun update(contractFile: Path): Outcome<List<SourceChange>> {
         val document =
-            try {
-                LocatedDocument.readMapping(contractFile)
-            } catch (e: Exception) {
-                diagnostics.error(
-                    Code.UNREADABLE,
-                    e.message ?: "cannot be read",
-                    Location(contractFile),
-                )
-                return emptyList()
+            when (val read = LocatedDocument.readMapping(contractFile)) {
+                is Outcome.Nok -> return read
+                is Outcome.Ok -> read.value
             }
 
+        val diagnostics = Diagnostics()
         val session = Session(contractFile, RemoteMode.UPDATE, diagnostics)
-        document.root.path("sources").properties().forEach { (name, source) ->
-            val path = source.path("path").asString()
+        document.root.path(Keys.SOURCES).properties().forEach { (name, source) ->
+            val path = source.path(Keys.PATH).asString()
             if (isRemote(path)) {
                 session.resolve(
                     path,
-                    document.locate("/sources/${LocatedDocument.segment(name)}/path"),
+                    document.locate("/${Keys.SOURCES}/${LocatedDocument.segment(name)}/${Keys.PATH}"),
                 )
             }
         }
 
-        return session.finish()
+        val changes = session.finish()
+        return Outcome.of(changes, diagnostics.all)
     }
 
-    /** One run over the remote sources of a contract: reads `rialto.lock`, writes it in [finish]. */
-    class Session(
+    /**
+     * One run over the remote sources of a contract: reads `rialto.lock`, writes it in [finish].
+     *
+     * The caller calls [resolve] for each remote source and [finish] once at the end, so the lock is written at
+     * most once per run, and only when the run had no errors: a failed run never pins a half-checked state.
+     *
+     * A session is a part of the step that creates it ([update], or [Sources.load]) and reports into the
+     * collector of that step, [diagnostics], so its findings stand between the others in the order of the
+     * sources. [finish] looks at every error in that collector, not only at those of the remote sources.
+     */
+    internal class Session(
         private val contractFile: Path,
         private val mode: RemoteMode,
         private val diagnostics: Diagnostics,
@@ -139,8 +148,10 @@ object RemoteSources {
             val name = fileName(url)
 
             if (mode != RemoteMode.UPDATE && pinned != null) {
-                val cached = cached(pinned, name)
-                if (cached != null) return cached.also { hashes[url] = pinned }
+                val cached = RialtoCache.cached(pinned, name)
+                if (cached != null) {
+                    return cached.also { hashes[url] = pinned }
+                }
             }
 
             if (mode == RemoteMode.OFFLINE) {
@@ -169,7 +180,7 @@ object RemoteSources {
                     return null
                 }
 
-            val hash = sha256(body)
+            val hash = RialtoCache.sha256(body)
             if (mode != RemoteMode.UPDATE && pinned != null && hash != pinned) {
                 diagnostics.error(
                     Code.REMOTE_CHANGED,
@@ -181,7 +192,7 @@ object RemoteSources {
             }
 
             hashes[url] = hash
-            return store(hash, name, body)
+            return RialtoCache.store(hash, name, body)
         }
 
         /** Writes `rialto.lock` when a source was added or updated; returns the changed hashes. */
@@ -192,28 +203,30 @@ object RemoteSources {
                     return emptyList()
                 }
 
-            if (diagnostics.hasErrors) return emptyList()
+            if (diagnostics.hasErrors) {
+                return emptyList()
+            }
+
             val changes =
                 hashes
                     .filter { (url, hash) -> locked[url] != hash }
                     .map { (url, hash) -> SourceChange(url, locked[url], hash) }
 
-            // Entries of sources the contract no longer uses are dropped with any other change.
-            val next =
-                if (mode == RemoteMode.UPDATE) {
-                    hashes
-                } else {
-                    locked.filterKeys { it in hashes } + hashes
-                }
+            // The new lock holds exactly the sources of this run: an entry of a source the contract no longer uses
+            // is dropped.
+            val next: Map<String, String> = hashes
 
             if (next != locked && mode != RemoteMode.OFFLINE) {
                 try {
                     writeLock(next)
-                } catch (e: java.io.IOException) {
+                } catch (e: IOException) {
                     // Dropping an entry that is no longer used can wait for the next run; a new or changed hash cannot.
-                    if (changes.isEmpty()) return changes
+                    if (changes.isEmpty()) {
+                        return changes
+                    }
+
                     lockError(
-                        "Cannot write the lock $lockFile: ${osMessage(e)}",
+                        "Cannot write the lock $lockFile: ${RialtoLock.osMessage(e)}",
                         changes.map { it.url },
                     )
                     return emptyList()
@@ -247,16 +260,9 @@ object RemoteSources {
 
         private fun readLock(): Map<String, String>? =
             try {
-                if (Files.isDirectory(lockFile)) throw RialtoLock.Unreadable("it is a directory")
                 RialtoLock(lockFile).read().sources
             } catch (e: RialtoLock.Unreadable) {
                 unreadable = e.message
-                null
-            } catch (e: tools.jackson.core.JacksonException) {
-                unreadable = "not valid YAML: ${e.originalMessage}"
-                null
-            } catch (e: java.io.IOException) {
-                unreadable = osMessage(e)
                 null
             }
 
@@ -276,44 +282,6 @@ object RemoteSources {
                 .replace(Regex("[^A-Za-z0-9._-]"), "_")
         return segment.takeUnless { it.isEmpty() || it.all { char -> char == '.' } } ?: "source"
     }
-
-    private fun cached(
-        hash: String,
-        name: String,
-    ): Path? {
-        val file = cacheDir().resolve("sha256").resolve(hash).resolve(name)
-        return file.takeIf { it.exists() && sha256(it.readBytes()) == hash }
-    }
-
-    private fun store(
-        hash: String,
-        name: String,
-        body: ByteArray,
-    ): Path {
-        val directory = cacheDir().resolve("sha256").resolve(hash).createDirectories()
-        val file = directory.resolve(name)
-        val temporary = Files.createTempFile(directory, name, ".part")
-        Files.write(temporary, body)
-        Files.move(
-            temporary,
-            file,
-            StandardCopyOption.REPLACE_EXISTING,
-            StandardCopyOption.ATOMIC_MOVE,
-        )
-        return file
-    }
-
-    /** The operating system's message for a failed file operation, without the path of the file. */
-    internal fun osMessage(e: java.io.IOException): String =
-        when (e) {
-            is java.nio.file.AccessDeniedException -> "Permission denied"
-            is java.nio.file.NoSuchFileException -> "No such file or directory"
-            is java.nio.file.FileSystemException -> e.reason ?: e.javaClass.simpleName
-            else -> e.message ?: e.javaClass.simpleName
-        }
-
-    fun sha256(bytes: ByteArray): String =
-        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     private fun httpFetch(url: URI): ByteArray {
         val request =

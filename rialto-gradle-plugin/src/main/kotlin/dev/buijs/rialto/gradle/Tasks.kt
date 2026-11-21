@@ -16,14 +16,17 @@ package dev.buijs.rialto.gradle
 import dev.buijs.rialto.contract.ContractFiles
 import dev.buijs.rialto.contract.ContractValidator
 import dev.buijs.rialto.contract.Diagnostic
-import dev.buijs.rialto.contract.Diagnostics
+import dev.buijs.rialto.contract.Outcome
 import dev.buijs.rialto.contract.RemoteMode
 import dev.buijs.rialto.contract.RemoteSources
 import dev.buijs.rialto.contract.Severity
+import dev.buijs.rialto.contract.SourceChange
+import dev.buijs.rialto.contract.relativePath
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.logging.LogLevel
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.CacheableTask
@@ -35,38 +38,10 @@ import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
-import java.io.File
-
-/** The path of [file] relative to [directory], with `/` as separator. */
-internal fun relativePath(
-    directory: File,
-    file: File,
-): String =
-    directory.absoluteFile
-        .toPath()
-        .normalize()
-        .relativize(file.absoluteFile.toPath().normalize())
-        .joinToString("/")
-
-private fun report(
-    task: DefaultTask,
-    diagnostics: List<Diagnostic>,
-) {
-    diagnostics.forEach {
-        if (it.severity == Severity.ERROR) {
-            task.logger.error(it.toString())
-        } else {
-            task.logger.warn(it.toString())
-        }
-    }
-
-    val errors = diagnostics.count { it.severity == Severity.ERROR }
-
-    if (errors > 0) throw GradleException("Rialto found $errors error(s); see the messages above.")
-}
+import org.gradle.work.DisableCachingByDefault
 
 /** Fetches every remote source of the contract again and locks its new hash (`rialtoSourcesUpdate`, K4.2). */
-@org.gradle.work.DisableCachingByDefault(
+@DisableCachingByDefault(
     because = "It fetches remote documents and writes rialto.lock.",
 )
 abstract class SourcesUpdateTask : DefaultTask() {
@@ -75,28 +50,34 @@ abstract class SourcesUpdateTask : DefaultTask() {
 
     @TaskAction
     fun update() {
-        val diagnostics = Diagnostics()
-        val changes = RemoteSources.update(contract.get().asFile.toPath(), diagnostics)
-        changes.forEach { logger.lifecycle("${it.url}: ${it.before ?: "new"} -> ${it.after}") }
+        val contract = contract.get().asFile.toPath()
+        val outcome = RemoteSources.update(contract)
+        log(this, outcome.diagnostics)
 
-        report(this, diagnostics.all)
-        logger.lifecycle("${changes.size} remote source(s) updated in ${RemoteSources.LOCK_FILE}")
+        when (outcome) {
+            is Outcome.Nok -> {
+                throw failure(outcome)
+            }
+            is Outcome.Ok -> {
+                outcome.value.forEach { logger.lifecycle(it.toString()) }
+
+                logger.lifecycle(SourceChange.summary(outcome.value))
+            }
+        }
     }
 }
 
-/** Validates the contract (`rialtoValidate`). */
+/**
+ * Validates the contract (`rialtoValidate`), as `rialto validate` does.
+ *
+ * A validation has no real output, so the task writes a marker file in [marker] when it succeeds: that gives
+ * Gradle something to keep up to date and to cache, and an unchanged contract is not validated again.
+ */
 @CacheableTask
 abstract class ValidateTask : DefaultTask() {
     /** Remote sources from the cache only, as with Gradle's `--offline` (K4.3). */
     @get:Internal
     abstract val offline: Property<Boolean>
-
-    private val remote: RemoteMode get() =
-        if (offline.getOrElse(false)) {
-            RemoteMode.OFFLINE
-        } else {
-            RemoteMode.LOCKED
-        }
 
     @get:Internal
     abstract val contract: RegularFileProperty
@@ -108,9 +89,22 @@ abstract class ValidateTask : DefaultTask() {
     @get:OutputDirectory
     val marker = project.layout.buildDirectory.dir("rialto/validate")
 
+    private val remote: RemoteMode get() =
+        if (offline.getOrElse(false)) {
+            RemoteMode.OFFLINE
+        } else {
+            RemoteMode.LOCKED
+        }
+
     @TaskAction
     fun validate() {
-        report(this, ContractValidator.validate(contract.get().asFile.toPath(), remote).diagnostics)
+        val contract = contract.get().asFile.toPath()
+        val outcome = ContractValidator.validate(contract, remote)
+        log(this, outcome.diagnostics)
+        if (outcome is Outcome.Nok) {
+            throw failure(outcome)
+        }
+
         marker
             .get()
             .asFile
@@ -133,7 +127,7 @@ abstract class BundleTask : DefaultTask() {
     abstract val output: RegularFileProperty
 
     /**
-     * Where [contract] lies seen from the directory of [output]. The bundle writes the source paths
+     * Where [contract] is stored seen from the directory of [output]. The bundle writes the source paths
      * relative to [output], so the layout belongs in the cache key; [contractInputs] only covers
      * the names of the files.
      */
@@ -141,17 +135,43 @@ abstract class BundleTask : DefaultTask() {
     val contractLocation: Provider<String>
         get() =
             contract.zip(output.locationOnly) { contract, output ->
-                relativePath(output.asFile.parentFile, contract.asFile)
+                relativePath(output.asFile.parentFile.toPath(), contract.asFile.toPath())
             }
 
     @TaskAction
     fun bundle() {
-        val diagnostics = Diagnostics()
-        ContractFiles.bundle(
-            contract.get().asFile.toPath(),
-            output.get().asFile.toPath(),
-            diagnostics,
-        )
-        report(this, diagnostics.all)
+        val contract = contract.get().asFile.toPath()
+        val output = output.get().asFile.toPath()
+        val outcome = ContractFiles.bundle(contract, output)
+        log(this, outcome.diagnostics)
+        if (outcome is Outcome.Nok) {
+            throw failure(outcome)
+        }
     }
 }
+
+/** Logs [diagnostics] on [task], each at the level of its severity. */
+internal fun log(
+    task: DefaultTask,
+    diagnostics: List<Diagnostic>,
+) {
+    diagnostics.forEach {
+        task.logger.log(it.severity.toLogLevel(), it.toString())
+    }
+}
+
+/** The exception that fails the build for [outcome]; its findings were logged before. Warnings never fail a build. */
+internal fun failure(outcome: Outcome.Nok): GradleException {
+    val errors =
+        outcome.diagnostics.count {
+            it.severity == Severity.ERROR
+        }
+
+    return GradleException("Rialto found $errors error(s); see the messages above.")
+}
+
+private fun Severity.toLogLevel() =
+    when (this) {
+        Severity.ERROR -> LogLevel.ERROR
+        Severity.WARNING -> LogLevel.WARN
+    }

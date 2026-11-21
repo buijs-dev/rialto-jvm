@@ -62,6 +62,8 @@ class FormatChecksTest {
             ref("/types/Recipient/variants/person"),
             ref("/types/Shipment/properties/note/type"),
             ref("/types/Shipment/properties/note/type", "map<string, Nope>"),
+            // A map key that names no type is unresolved; whether it is an enum is not asked then.
+            ref("/types/Shipment/properties/note/type", "map<Nope, string>"),
             Case(
                 "/types/Shipment/properties/note/type",
                 "map<Address, string>",
@@ -70,6 +72,14 @@ class FormatChecksTest {
             Case(
                 "/types/Shipment/properties/rejectionReason/type",
                 "decimal(2,3)",
+                Code.TYPE_EXPRESSION,
+            ),
+            // The scalar of a wrapper is checked like the type of a property.
+            Case("/types/ShipmentId/wraps", "decimal(2,3)", Code.TYPE_EXPRESSION),
+            // More digits than an integer holds is an invalid type, not a crash.
+            Case(
+                "/types/Shipment/properties/rejectionReason/type",
+                "decimal(99999999999,2)",
                 Code.TYPE_EXPRESSION,
             ),
             // A shape over a union has the identity its variants share; a projection over a projection its paths.
@@ -95,6 +105,8 @@ class FormatChecksTest {
             ref("/types/ShipmentCity/properties/city", "destination.city.deeper"),
             ref("/types/ShipmentSummary/properties/0", "nope"),
             ref("/shapes/CreateShipment/properties/lines/shape"),
+            // A shape over a type that does not exist has no properties to check.
+            ref("/shapes/CreateShipment/source"),
             ref("/shapes/CountShipments/properties/nope", mapOf("role" to "caller")),
             Case(
                 "/shapes/Address",
@@ -175,6 +187,7 @@ class FormatChecksTest {
             external("/storage/Shipment/links/tags/ownerKey", "nope"),
             external("/storage/Shipment/links/tags/targetKey", "nope"),
             external("/storage/Shipment/links/scans/ownerKey", "nope"),
+            external("/storage/Shipment/links/tags/order", "nope"),
             external("/storage/Shipment/version", "nope"),
             external("/storage/Shipment/storageKey", "nope"),
             external("/storage/Carrier/delete/soft", "nope"),
@@ -183,6 +196,7 @@ class FormatChecksTest {
             external("/storage/DeliveryProof/blobs/file/sha256", "nope"),
             // Views and navigation.
             ref("/views/ShipmentDetail/load", "nope"),
+            ref("/views/ShipmentProof/submit", "nope"),
             ref("/views/ShipmentDetail/fields/note/edit", "nope"),
             ref("/views/ShipmentDetail/fields/warehouse/link"),
             ref("/views/ShipmentDetail/fields/warehouse/options/operation", "nope"),
@@ -238,10 +252,36 @@ class FormatChecksTest {
         }
     }
 
+    /** An owned list child that keeps its order in a position column. */
+    private val child =
+        mapOf(
+            "parentKey" to "shipment_id",
+            "reconcile" to "identity",
+            "onDelete" to "cascade",
+            "order" to "position",
+        )
+
     /** Changes to the Shipment example that stay valid: each a set of values by pointer. */
     private val valid =
         listOf(
             mapOf("/types/Shipment/properties/note/type" to "map<Status, string>"),
+            // The position column of a child or link whose target has no table is checked by the profile, not here:
+            // a property the entity lacks, one of a scalar type, one whose type is not stored, and the storage of a
+            // projection.
+            mapOf(
+                "/storage/Shipment/children/nope" to child,
+                "/storage/Shipment/children/note" to child,
+                "/storage/Shipment/children/recipient" to child,
+                "/storage/Shipment/links/nope" to mapOf("ownerKey" to "shipment_id"),
+                "/storage/ShipmentSummary/children" to
+                    mapOf("lines" to child),
+            ),
+            // A blob needs only its key column; a soft delete only its marker.
+            mapOf(
+                "/storage/DeliveryProof/blobs/file" to
+                    mapOf("store" to "proofs", "key" to "file_key"),
+                "/storage/Carrier/delete" to mapOf("soft" to "deleted_at"),
+            ),
             mapOf(
                 "/shapes/Nope" to
                     mapOf(

@@ -13,6 +13,12 @@
 
 package dev.buijs.rialto.gradle
 
+import dev.buijs.rialto.contract.Code
+import dev.buijs.rialto.contract.Diagnostic
+import dev.buijs.rialto.contract.Location
+import dev.buijs.rialto.contract.Outcome
+import dev.buijs.rialto.contract.Severity
+import dev.buijs.rialto.contract.relativePath
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.gradle.api.GradleException
@@ -29,14 +35,11 @@ class RialtoPluginTest {
     lateinit var temporary: File
 
     /** The project directory, with symbolic links resolved as Gradle resolves them. */
-    private val dir: File get() = temporary.canonicalFile
+    private val dir: File
+        get() = temporary.canonicalFile
 
-    private val contracts =
-        Path
-            .of(
-                System.getProperty("rialto.spec"),
-            ).resolve("examples/contracts")
-            .toFile()
+    /** The test contracts of this module, copies of a few of the specification's (see [testContracts]). */
+    private val contracts = testContracts()
 
     private fun project(contract: String? = null): Project =
         ProjectBuilder.builder().withProjectDir(dir).build().also { project ->
@@ -114,6 +117,18 @@ class RialtoPluginTest {
     }
 
     @Test
+    fun `a contract that is no valid YAML is an input with its lock, and validate reports it`() {
+        write("broken.rialto.yaml", "rialto: [unclosed\n")
+        val project = project("broken.rialto.yaml")
+        val inputs = project.task<BundleTask>("rialtoBundle").contractInputs.files
+        assertThat(
+            inputs,
+        ).containsExactly(dir.resolve("broken.rialto.yaml"), dir.resolve("rialto.lock"))
+        val validate = project.task<ValidateTask>("rialtoValidate")
+        assertThatThrownBy { validate.validate() }.isInstanceOf(GradleException::class.java)
+    }
+
+    @Test
     fun `validate marks a valid contract and fails on an invalid one with the count of errors`() {
         contracts.resolve("valid/minimal.yaml").copyTo(dir.resolve("valid.yaml"))
         val valid = project("valid.yaml").task<ValidateTask>("rialtoValidate")
@@ -181,9 +196,22 @@ class RialtoPluginTest {
 
     @Test
     fun `relative paths use slashes and climb out of the directory`() {
-        assertThat(relativePath(File("/a/b"), File("/a/b/c/d.yaml"))).isEqualTo("c/d.yaml")
+        assertThat(relativePath(Path.of("/a/b"), Path.of("/a/b/c/d.yaml"))).isEqualTo("c/d.yaml")
         assertThat(
-            relativePath(File("/a/b/build/rialto"), File("/a/b/c.yaml")),
+            relativePath(Path.of("/a/b/build/rialto"), Path.of("/a/b/c.yaml")),
         ).isEqualTo("../../c.yaml")
+    }
+
+    @Test
+    fun `a task logs warnings and fails only on errors, with their count`() {
+        val task = project().tasks.register("probe", org.gradle.api.DefaultTask::class.java).get()
+        val at = Location(Path.of("a.yaml"))
+        val warning = Diagnostic(Severity.WARNING, Code.SCHEMA, "careful", at)
+        val error = Diagnostic(Severity.ERROR, Code.SCHEMA, "wrong", at)
+
+        log(task, listOf(warning, error))
+        assertThat(failure(Outcome.Nok(listOf(warning, error, error))))
+            .isInstanceOf(GradleException::class.java)
+            .hasMessage("Rialto found 2 error(s); see the messages above.")
     }
 }

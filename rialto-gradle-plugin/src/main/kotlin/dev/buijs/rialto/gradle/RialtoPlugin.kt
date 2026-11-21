@@ -14,9 +14,6 @@
 package dev.buijs.rialto.gradle
 
 import dev.buijs.rialto.contract.ContractFiles
-import dev.buijs.rialto.contract.LocatedDocument
-import dev.buijs.rialto.contract.RemoteSources
-import dev.buijs.rialto.contract.migrations
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.file.RegularFileProperty
@@ -27,7 +24,14 @@ abstract class RialtoExtension {
     abstract val contract: RegularFileProperty
 }
 
-/** Registers `rialtoValidate`, `rialtoBundle` and `rialtoSourcesUpdate` for the contract of the `rialto` extension. */
+/**
+ * Registers `rialtoValidate`, `rialtoBundle` and `rialtoSourcesUpdate` for the contract of the `rialto` extension.
+ *
+ * The plugin brings the same commands as the command line into a Gradle build, so a project checks its contract
+ * with a task of its own build, without installing the command line. The rules all live in rialto-core, which
+ * also says which files a result depends on ([ContractFiles.inputs]); the plugin hands those to Gradle, so a
+ * task is up to date, or comes from the build cache, until one of them changes.
+ */
 class RialtoPlugin : Plugin<Project> {
     override fun apply(project: Project) {
         val extension = project.extensions.create("rialto", RialtoExtension::class.java)
@@ -36,23 +40,7 @@ class RialtoPlugin : Plugin<Project> {
         val contractInputs =
             project.files(
                 extension.contract.map { contract ->
-                    val file = contract.asFile
-                    if (!file.exists()) return@map listOf(file)
-                    val sources = LocatedDocument.read(file.toPath()).root.path("sources")
-                    // A remote source is tracked through its hash in rialto.lock (K4), a fragment as a file (K5).
-                    listOf(file, file.parentFile.resolve(RemoteSources.LOCK_FILE)) +
-                        ContractFiles.fragments(file.toPath()).map { it.toFile() } +
-                        sources
-                            .mapNotNull { it.get("path")?.asString() }
-                            .filterNot(RemoteSources::isRemote)
-                            .flatMap { path ->
-                                // A migrations glob (K1.9) tracks every file it matches.
-                                if ('*' in path) {
-                                    migrations(file.parentFile.toPath(), path).map { it.toFile() }
-                                } else {
-                                    listOf(file.parentFile.resolve(path))
-                                }
-                            }
+                    ContractFiles.inputs(contract.asFile.toPath()).map { it.toFile() }
                 },
             )
 

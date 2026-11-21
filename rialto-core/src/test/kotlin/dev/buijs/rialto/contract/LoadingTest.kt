@@ -13,6 +13,9 @@
 
 package dev.buijs.rialto.contract
 
+import io.mockk.every
+import io.mockk.mockkObject
+import io.mockk.unmockkObject
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -72,7 +75,7 @@ class LoadingTest {
     }
 
     @Test
-    fun `YAML is read as YAML 1_2 with the core schema, as rialto-dart reads it`() {
+    fun `YAML is read as YAML 1_2 with the core schema`() {
         val document =
             LocatedDocument.parse(
                 Path.of("doc.yaml"),
@@ -105,6 +108,43 @@ class LoadingTest {
     }
 
     @Test
+    fun `a key that is used twice in one mapping is RIALTO-K001, in YAML and in JSON`() {
+        val yaml =
+            validate(
+                "c.yaml",
+                "rialto: '1.0.0'\ninfo: {name: x, version: 1.0.0}\nrialto: '2.0.0'\n",
+            )
+        assertThat(yaml.diagnostics.single().code).isEqualTo(Code.UNREADABLE)
+        assertThat(yaml.diagnostics.single().message)
+            .isEqualTo("Duplicate key 'rialto' at line 3, column 1")
+
+        val json =
+            validate(
+                "c.json",
+                """{"types": {"A": {"kind": "value"}, "A": {"kind": "value"}}}""",
+            )
+        assertThat(json.diagnostics.single().code).isEqualTo(Code.UNREADABLE)
+        assertThat(json.diagnostics.single().message)
+            .startsWith("Duplicate key 'A' at line 1, column ")
+    }
+
+    @Test
+    fun `a file with more than one document is RIALTO-K001`() {
+        val contract = "rialto: '1.0.0'\ninfo: {name: x, version: 1.0.0}\n"
+
+        val second = validate("c.yaml", "$contract---\nb: 2\n")
+        assertThat(second.diagnostics.single().code).isEqualTo(Code.UNREADABLE)
+        assertThat(second.diagnostics.single().message)
+            .startsWith("Only one document is expected, but more follows at line ")
+
+        val trailing = validate("c.json", """{"rialto": "1.0.0"} {"more": 1}""")
+        assertThat(trailing.diagnostics.single().code).isEqualTo(Code.UNREADABLE)
+
+        // A document start or end marker alone is no second document.
+        assertThat(validate("c.yaml", "---\n$contract...\n# done\n").diagnostics).isEmpty()
+    }
+
+    @Test
     fun `pointer segments escape tilde and slash`() {
         assertThat(LocatedDocument.segment("a/b~c")).isEqualTo("a~1b~0c")
     }
@@ -126,15 +166,16 @@ class LoadingTest {
             assertThat(diagnostic.message).contains(found)
         }
 
-        assertThatThrownBy { LocatedDocument.readMapping(write("l.yaml", "- a\n")) }
-            .hasMessage("The document is not a mapping but a list")
+        val list = LocatedDocument.readMapping(write("l.yaml", "- a\n"))
+        assertThat(list).isInstanceOf(Outcome.Nok::class.java)
+        assertThat(list.diagnostics.single().message)
+            .isEqualTo("The document is not a mapping but a list")
     }
 
     @Test
     fun `a contract file that does not exist is RIALTO-K001`() {
         val result = ContractValidator.validate(work.resolve("missing.yaml"))
-        assertThat(result.valid).isFalse()
-        assertThat(result.contract).isNull()
+        assertThat(result).isInstanceOf(Outcome.Nok::class.java)
         assertThat(result.diagnostics.single().code).isEqualTo(Code.UNREADABLE)
     }
 
@@ -189,7 +230,7 @@ class LoadingTest {
     }
 
     @Test
-    fun `a document that does not fit the model is RIALTO-K002 at the root, not a crash`() {
+    fun `a document that does not fit the model is RIALTO-K002 at the element it rejects, not a crash`() {
         // The JSON Schema rejects this document; the model step guards a gap between the schema and the model.
         val file = work.resolve("c.yaml")
         val document =
@@ -198,11 +239,11 @@ class LoadingTest {
                 "rialto: '1.0.0'\ninfo: {name: x, version: 1.0.0}\n" +
                     "types:\n  T:\n    kind: value\n    properties:\n      a: {type: string, maxLength: 99999999999999}\n",
             )
-        val diagnostics = Diagnostics()
-        assertThat(ContractValidator.model(document, diagnostics)).isNull()
-        val diagnostic = diagnostics.all.single()
+        val outcome = ContractValidator.model(document)
+        assertThat(outcome).isInstanceOf(Outcome.Nok::class.java)
+        val diagnostic = outcome.diagnostics.single()
         assertThat(diagnostic.code).isEqualTo(Code.SCHEMA)
-        assertThat(diagnostic.location).isEqualTo(Location(file, 1, 1, ""))
+        assertThat(diagnostic.location).isEqualTo(Location(file, 4, 3, "/types/T"))
         assertThat(diagnostic.message)
             .startsWith(
                 "the contract passes the JSON Schema but does not fit the contract model at /types/T: ",
@@ -219,8 +260,7 @@ class LoadingTest {
         val diagnostic = result.diagnostics.single()
         assertThat(diagnostic.code).isEqualTo(Code.UNRESOLVED_REFERENCE)
         assertThat(diagnostic.location.line).isEqualTo(1)
-        assertThat(result.contract).isNotNull()
-        assertThat(result.valid).isFalse()
+        assertThat(result).isInstanceOf(Outcome.Nok::class.java)
     }
 
     @Test
@@ -250,17 +290,78 @@ class LoadingTest {
     }
 
     @Test
-    fun `a valid result needs a model and no errors, warnings allowed`() {
-        val contract =
-            ContractMapper.json.readValue(
-                """{"rialto": "1.0.0", "info": {"name": "x", "version": "1.0.0"}}""",
-                Contract::class.java,
-            )
+    fun `an outcome is Ok without errors, warnings allowed, and Nok with at least one error`() {
         val warning = Diagnostic(Severity.WARNING, Code.SCHEMA, "w", Location(Path.of("c.yaml")))
-        assertThat(ValidationResult(contract, listOf(warning)).valid).isTrue()
+        val error = Diagnostic.error(Code.SCHEMA, "e", Location(Path.of("c.yaml")))
+
+        assertThat(Outcome.Ok("value").diagnostics).isEmpty()
+        assertThat(Outcome.Ok("value", listOf(warning)).value).isEqualTo("value")
+        assertThat(Outcome.Nok(listOf(warning, error)).diagnostics).containsExactly(warning, error)
+
+        assertThatThrownBy { Outcome.Ok("value", listOf(warning, error)) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("An outcome with an error is not Ok")
+        assertThatThrownBy { Outcome.Nok(listOf(warning)) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("An outcome without an error is not Nok")
+    }
+
+    @Test
+    fun `an outcome of a value and its findings is Nok as soon as one finding is an error`() {
+        val warning = Diagnostic(Severity.WARNING, Code.SCHEMA, "w", Location(Path.of("c.yaml")))
+        val error = Diagnostic.error(Code.SCHEMA, "e", Location(Path.of("c.yaml")))
+
+        assertThat(Outcome.of("value", listOf(warning)))
+            .isEqualTo(Outcome.Ok("value", listOf(warning)))
+        assertThat(Outcome.of("value", listOf(warning, error)))
+            .isEqualTo(Outcome.Nok(listOf(warning, error)))
+    }
+
+    @Test
+    fun `a warning has no hint unless it is given one`() {
+        val diagnostics = Diagnostics()
+        diagnostics.warning(Code.SCHEMA, "careful", Location(Path.of("a.yaml")))
+
+        assertThat(diagnostics.all.single()).matches {
+            it.hint == null &&
+                it.severity == Severity.WARNING
+        }
+
+        assertThat(diagnostics.hasErrors).isFalse()
         assertThat(
-            ValidationResult(contract, listOf(warning.copy(severity = Severity.ERROR))).valid,
-        ).isFalse()
-        assertThat(ValidationResult(null, emptyList()).valid).isFalse()
+            diagnostics.all.single().toString(),
+        ).isEqualTo("warning[RIALTO-K002] a.yaml: careful (K1.7)")
+    }
+
+    @Test
+    fun `a location shows the line, the column or 1, and the pointer it knows`() {
+        assertThat(Location(Path.of("/x/a.yaml")).toString()).isEqualTo("a.yaml")
+        assertThat(Location(Path.of("a.yaml"), 3).toString()).isEqualTo("a.yaml:3:1")
+        assertThat(
+            Location(Path.of("a.yaml"), 3, 7, "/info").toString(),
+        ).isEqualTo("a.yaml:3:7 #/info")
+    }
+
+    @Test
+    fun `every code has an id, a requirement and a summary`() {
+        assertThat(Code.entries).allMatch {
+            it.id.startsWith("RIALTO-") && it.summary.isNotBlank()
+        }
+
+        assertThat(Severity.entries.map { it.label }).containsExactly("error", "warning")
+    }
+
+    @Test
+    fun `a contract that cannot be read without a reason is reported as one that cannot be read`() {
+        mockkObject(LocatedDocument.Companion)
+        try {
+            every { LocatedDocument.read(any<Path>()) } throws IllegalStateException()
+
+            val outcome = LocatedDocument.readMapping(Path.of("a.yaml"))
+            assertThat(outcome).isInstanceOf(Outcome.Nok::class.java)
+            assertThat(outcome.diagnostics.single().message).isEqualTo("cannot be read")
+        } finally {
+            unmockkObject(LocatedDocument.Companion)
+        }
     }
 }

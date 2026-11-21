@@ -13,17 +13,37 @@
 
 package dev.buijs.rialto.contract
 
-/** Looks up the properties of types and shapes, and resolves property paths. */
+/**
+ * Looks up the properties of types and shapes, and resolves property paths.
+ *
+ * Several kinds of type have no property list of their own: a projection takes its properties from its source,
+ * a shape from the type it shapes, and a union only shares the identity of its variants. Checks that ask
+ * "does `destination.city` exist on this type?" use this class, so that answer is the same in every check.
+ */
 internal class ContractTypes(
     private val contract: Contract,
 ) {
-    /** The properties of a type or shape, following a projection to its source. */
-    fun propertiesOf(
+    /**
+     * The properties of the type or shape [name], following a projection or shape to its source; for a union the
+     * identity properties every variant has with the same type. Null for an unknown name, an enum, or sources
+     * that go round in a circle.
+     */
+    fun propertiesOf(name: String): Map<String, Property>? = propertiesOf(name, open = emptySet())
+
+    /**
+     * [open] holds what is being looked up, so that a circle ends where it meets itself: a projection or shape by
+     * its name while its source is followed, and a projection property as `Type.property` while its path is
+     * resolved.
+     */
+    private fun propertiesOf(
         name: String,
-        depth: Int = 0,
+        open: Set<String>,
     ): Map<String, Property>? {
         // A projection or shape whose sources go round in a circle has no properties.
-        if (depth > MAX_DEPTH) return null
+        if (name in open) {
+            return null
+        }
+
         return when (val type = contract.types[name]) {
             is TypeDecl.Entity -> {
                 type.properties
@@ -47,20 +67,49 @@ internal class ContractTypes(
                 }
             }
             is TypeDecl.Projection -> {
-                if (propertiesOf(type.source, depth + 1) == null) return null
+                if (propertiesOf(type.source, open + name) == null) {
+                    return null
+                }
+
                 // Each projection property is the property its source path ends in.
-                type.paths
-                    .mapNotNull { (property, path) ->
-                        resolvePath(type.source, path)?.let {
-                            property to
-                                it.property
-                        }
-                    }.toMap()
+                val properties = mutableMapOf<String, Property>()
+                type.paths.keys.forEach { property ->
+                    val resolved = propertyOf(name, property, open)
+                    if (resolved != null) {
+                        properties[property] = resolved
+                    }
+                }
+
+                properties
             }
             else -> {
-                contract.shapes[name]?.let { propertiesOf(it.source, depth + 1) }
+                contract.shapes[name]?.let { propertiesOf(it.source, open + name) }
             }
         }
+    }
+
+    /**
+     * The property [property] of the type [owner]. For a projection it resolves the path of that property only, not
+     * of every property: a path may pass through a type that refers back to the projection (`parent.id`, where
+     * `parent` is the projection itself), and only a property whose path leads back to that same property is a
+     * circle.
+     */
+    private fun propertyOf(
+        owner: String,
+        property: String,
+        open: Set<String>,
+    ): Property? {
+        val projection =
+            contract.types[owner] as? TypeDecl.Projection
+                ?: return propertiesOf(owner, open)?.get(property)
+
+        val path = projection.paths[property] ?: return null
+        val key = "$owner.$property"
+        if (key in open) {
+            return null
+        }
+
+        return resolve(projection.source, path, crossed = false, open + key)?.property
     }
 
     /** A resolved property path: its final property and whether it crossed a collection. */
@@ -69,29 +118,37 @@ internal class ContractTypes(
         val crossesCollection: Boolean,
     )
 
+    /**
+     * Resolves the dotted property [path] (`destination.city`) from the type [root], stepping through named types
+     * and the elements of lists and sets; null when a segment is not a property of the type before it.
+     */
     fun resolvePath(
         root: String,
         path: String,
-    ): ResolvedPath? {
-        var owner = root
-        var crosses = false
-        var property: Property? = null
-        path.split('.').forEach { segment ->
-            property = propertiesOf(owner)?.get(segment) ?: return null
-            val expression = TypeExpression.parse(property!!.type) ?: return null
-            val element =
-                when (expression) {
-                    is TypeExpression.ListOf -> expression.element.also { crosses = true }
-                    is TypeExpression.SetOf -> expression.element.also { crosses = true }
-                    else -> expression
-                }
+    ): ResolvedPath? = resolve(root, path, crossed = false, open = emptySet())
 
-            // A scalar has no properties: a further segment does not resolve.
-            owner = (element as? TypeExpression.Named)?.name ?: ""
+    private fun resolve(
+        owner: String,
+        path: String,
+        crossed: Boolean,
+        open: Set<String>,
+    ): ResolvedPath? {
+        val property = propertyOf(owner, path.substringBefore('.'), open) ?: return null
+        val expression = TypeExpression.parse(property.type) ?: return null
+        val element =
+            when (expression) {
+                is TypeExpression.ListOf -> expression.element
+                is TypeExpression.SetOf -> expression.element
+                else -> expression
+            }
+
+        val crosses = crossed || element != expression
+        if ('.' !in path) {
+            return ResolvedPath(property, crosses)
         }
 
-        return property?.let { ResolvedPath(it, crosses) }
+        // A scalar has no properties: a further segment does not resolve.
+        val next = (element as? TypeExpression.Named)?.name ?: return null
+        return resolve(next, path.substringAfter('.'), crosses, open)
     }
 }
-
-private const val MAX_DEPTH = 16

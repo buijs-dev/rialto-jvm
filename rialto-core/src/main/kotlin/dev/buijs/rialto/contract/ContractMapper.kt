@@ -29,14 +29,13 @@ import tools.jackson.module.kotlin.kotlinModule
 /**
  * The Jackson mappers between documents and the [Contract] model, configured in one place.
  *
- * Every reader and writer in this package uses these, so a contract reads the same everywhere (in the
- * validator, the bundle and `rialto.lock`) and the same as rialto-dart reads it: the JVM and the Dart tooling
- * must give the same verdict on the same file.
+ * Every reader and writer in this package uses these, so a contract reads the same everywhere: in the
+ * validator, the bundle and `rialto.lock`.
  */
 object ContractMapper {
     /**
-     * YAML 1.2 with its core schema, as rialto-dart reads it: `~` and `Null` are null, `yes` is a string, `0444` is
-     * 444 and `0o14` is 12.
+     * YAML 1.2 with its core schema: `~` and `Null` are null, `yes` is a string, `0444` is 444 and `0o14` is 12.
+     * YAML 1.1 reads `yes` as true and `0444` as an octal number, which would change what an author wrote.
      */
     val yamlFactory: YAMLFactory =
         YAMLFactory

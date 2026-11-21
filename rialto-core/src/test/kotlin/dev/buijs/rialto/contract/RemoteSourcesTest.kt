@@ -81,7 +81,7 @@ class RemoteSourcesTest {
     @Test
     fun `fetches a new remote source, locks it and reads it offline from the cache (K4_1, K4_3)`() {
         assertThat(codes()).isEmpty()
-        assertThat(lock()).contains("\"$url\": \"${RemoteSources.sha256(served!!)}\"")
+        assertThat(lock()).contains("\"$url\": \"${RialtoCache.sha256(served!!)}\"")
 
         served = null
         assertThat(codes(RemoteMode.OFFLINE)).isEmpty()
@@ -98,12 +98,11 @@ class RemoteSourcesTest {
         assertThat(codes()).containsExactly("RIALTO-S004")
         assertThat(lock()).isEqualTo(before)
 
-        val diagnostics = Diagnostics()
-        val changes = RemoteSources.update(contract, diagnostics)
-        assertThat(diagnostics.all).isEmpty()
-        assertThat(changes).singleElement().matches {
+        val update = RemoteSources.update(contract)
+        assertThat(update.diagnostics).isEmpty()
+        assertThat(update.valueOrFail()).singleElement().matches {
             it.url == url &&
-                it.after == RemoteSources.sha256(served!!)
+                it.after == RialtoCache.sha256(served!!)
         }
 
         assertThat(codes()).isEmpty()
@@ -121,7 +120,7 @@ class RemoteSourcesTest {
     @Test
     fun `keeps a contract with only local sources free of a lock file`() {
         val local = shipment.resolve("shipment.rialto.yaml")
-        assertThat(ContractValidator.validate(local).valid).isTrue()
+        assertThat(ContractValidator.validate(local)).isInstanceOf(Outcome.Ok::class.java)
         assertThat(local.parent.resolve(RemoteSources.LOCK_FILE).toFile()).doesNotExist()
     }
 
@@ -163,7 +162,7 @@ class RemoteSourcesTest {
     @Test
     fun `drops the entries of sources the contract no longer uses, and reads a cached source without fetching`() {
         codes()
-        val hash = RemoteSources.sha256(served!!)
+        val hash = RialtoCache.sha256(served!!)
         work.resolve(RemoteSources.LOCK_FILE).writeText(
             "sources:\n  \"$url\": \"$hash\"\n  \"https://old.example/a.json\": \"$hash\"\n",
         )
@@ -176,15 +175,15 @@ class RemoteSourcesTest {
     @Test
     fun `an update with errors locks nothing, and one of an unreadable contract is RIALTO-K001`() {
         served = null
-        val diagnostics = Diagnostics()
-        assertThat(RemoteSources.update(contract, diagnostics)).isEmpty()
-        assertThat(diagnostics.all.map { it.id }).containsExactly("RIALTO-S003")
+        val unavailable = RemoteSources.update(contract)
+        assertThat(unavailable).isInstanceOf(Outcome.Nok::class.java)
+        assertThat(unavailable.diagnostics.map { it.id }).containsExactly("RIALTO-S003")
         assertThat(work.resolve(RemoteSources.LOCK_FILE).toFile()).doesNotExist()
 
-        val unreadable = Diagnostics()
         contract.writeText("- a list\n")
-        assertThat(RemoteSources.update(contract, unreadable)).isEmpty()
-        assertThat(unreadable.all.single().code).isEqualTo(Code.UNREADABLE)
+        val unreadable = RemoteSources.update(contract)
+        assertThat(unreadable).isInstanceOf(Outcome.Nok::class.java)
+        assertThat(unreadable.diagnostics.single().code).isEqualTo(Code.UNREADABLE)
     }
 
     private val hint = "Repair or remove rialto.lock, then run `rialto sources update`"
@@ -240,9 +239,9 @@ class RemoteSourcesTest {
         ).isEqualTo("Cannot read the lock $lock: it is a directory. Not pinned: $url")
         assertThat(fetched).isZero()
 
-        val diagnostics = Diagnostics()
-        assertThat(RemoteSources.update(contract, diagnostics)).isEmpty()
-        assertThat(diagnostics.all.single().message).isEqualTo(diagnostic.message)
+        val update = RemoteSources.update(contract)
+        assertThat(update).isInstanceOf(Outcome.Nok::class.java)
+        assertThat(update.diagnostics.single().message).isEqualTo(diagnostic.message)
         assertThat(lock.toFile()).isDirectory()
     }
 
@@ -296,32 +295,32 @@ class RemoteSourcesTest {
         assertThat(diagnostic.location).isEqualTo(Location(contract))
         assertThat(diagnostic.hint).isEqualTo(hint)
 
-        val diagnostics = Diagnostics()
-        assertThat(RemoteSources.update(contract, diagnostics)).isEmpty()
-        assertThat(diagnostics.all.single().code).isEqualTo(Code.LOCK_UNUSABLE)
+        val update = RemoteSources.update(contract)
+        assertThat(update).isInstanceOf(Outcome.Nok::class.java)
+        assertThat(update.diagnostics.single().code).isEqualTo(Code.LOCK_UNUSABLE)
     }
 
     @Test
     fun `the system message of a file error leaves out the path`() {
         assertThat(
-            RemoteSources.osMessage(java.nio.file.NoSuchFileException("/x")),
+            RialtoLock.osMessage(java.nio.file.NoSuchFileException("/x")),
         ).isEqualTo("No such file or directory")
         assertThat(
-            RemoteSources.osMessage(
+            RialtoLock.osMessage(
                 java.nio.file.FileSystemException("/x", null, "Read-only file system"),
             ),
         ).isEqualTo("Read-only file system")
         assertThat(
-            RemoteSources.osMessage(java.nio.file.FileSystemException("/x")),
+            RialtoLock.osMessage(java.nio.file.FileSystemException("/x")),
         ).isEqualTo("FileSystemException")
-        assertThat(RemoteSources.osMessage(java.io.IOException("Disk full"))).isEqualTo("Disk full")
-        assertThat(RemoteSources.osMessage(java.io.IOException())).isEqualTo("IOException")
+        assertThat(RialtoLock.osMessage(java.io.IOException("Disk full"))).isEqualTo("Disk full")
+        assertThat(RialtoLock.osMessage(java.io.IOException())).isEqualTo("IOException")
     }
 
     @Test
     fun `a lock that only drops unused entries and cannot be written is left as it is`() {
         codes()
-        val hash = RemoteSources.sha256(served!!)
+        val hash = RialtoCache.sha256(served!!)
         val text = "sources:\n  \"$url\": \"$hash\"\n  \"https://old.example/a.json\": \"$hash\"\n"
         work.resolve(RemoteSources.LOCK_FILE).writeText(text)
         org.junit.jupiter.api.Assumptions
@@ -337,11 +336,41 @@ class RemoteSourcesTest {
 
     @Test
     fun `the cache lies in the system property, else the environment, else the home directory`() {
-        assertThat(RemoteSources.cacheDir()).isEqualTo(cache)
+        assertThat(RialtoCache.dir()).isEqualTo(cache)
         System.clearProperty("rialto.cache")
         val expected =
             System.getenv("RIALTO_CACHE")
                 ?: Path.of(System.getProperty("user.home"), ".cache", "rialto").toString()
-        assertThat(RemoteSources.cacheDir()).isEqualTo(Path.of(expected))
+        assertThat(RialtoCache.dir()).isEqualTo(Path.of(expected))
+    }
+
+    @Test
+    fun `a locked source that left the cache is fetched again and read when it still has its hash`() {
+        codes()
+        val before = lock()
+        cache.resolve("sha256").toFile().deleteRecursively()
+
+        assertThat(codes()).isEmpty()
+        assertThat(fetched).isEqualTo(2)
+        assertThat(lock()).isEqualTo(before)
+    }
+
+    @Test
+    fun `offline, a lock with an entry the contract no longer uses is left as it is`() {
+        codes()
+        val text =
+            lock() + "  \"https://old.example/a.json\": \"${RialtoCache.sha256(served!!)}\"\n"
+        work.resolve(RemoteSources.LOCK_FILE).writeText(text)
+
+        assertThat(codes(RemoteMode.OFFLINE)).isEmpty()
+        assertThat(lock()).isEqualTo(text)
+    }
+
+    @Test
+    fun `a change is reported as url, before and after, and an update by its count`() {
+        assertThat(SourceChange("https://a", null, "2").toString()).isEqualTo("https://a: new -> 2")
+        assertThat(SourceChange("https://a", "1", "2").toString()).isEqualTo("https://a: 1 -> 2")
+        assertThat(SourceChange.summary(listOf(SourceChange("https://a", "1", "2"))))
+            .isEqualTo("1 remote source(s) updated in rialto.lock")
     }
 }

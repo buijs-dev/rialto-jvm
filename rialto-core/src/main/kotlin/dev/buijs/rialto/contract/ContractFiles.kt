@@ -12,16 +12,12 @@
  */
 package dev.buijs.rialto.contract
 
-import com.networknt.schema.Schema
-import com.networknt.schema.SchemaRegistry
-import com.networknt.schema.SchemaRegistryConfig
-import com.networknt.schema.SpecificationVersion
-import com.networknt.schema.path.PathType
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.node.ArrayNode
 import tools.jackson.databind.node.ObjectNode
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.io.path.exists
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.writeText
 
@@ -29,250 +25,246 @@ import kotlin.io.path.writeText
  * Reads a contract over several files (K5): the root and the fragments its `include` lists, merged
  * into the bundled form. A contract without `include` is read as it is. Every element keeps the
  * file and line it was read from, so diagnostics name the fragment (K5.5).
+ *
+ * A large contract can be split over files for its authors, but everything after reading works on one document:
+ * the JSON Schema, the model and the checks never know there were several files. Splitting is a matter of
+ * authoring, not of meaning. [bundle] writes that one document, for publishing or for tools that read one file.
  */
 object ContractFiles {
     /** Sections merged per name; a name is declared in one file only. */
     private val keyed =
         setOf(
-            "types",
-            "shapes",
-            "operations",
-            "events",
-            "subscriptions",
-            "streams",
-            "storage",
-            "views",
+            Keys.TYPES,
+            Keys.SHAPES,
+            Keys.OPERATIONS,
+            Keys.EVENTS,
+            Keys.SUBSCRIPTIONS,
+            Keys.STREAMS,
+            Keys.STORAGE,
+            Keys.VIEWS,
         )
 
     /** Keys only the root declares. */
-    private val rootOnly = setOf("info", "sources", "include")
+    private val rootOnly = setOf(Keys.INFO, Keys.SOURCES, Keys.INCLUDE)
 
-    private val contractSchema: JsonNode by lazy {
-        requireNotNull(
-            ContractFiles::class.java.getResourceAsStream("contract-1.0.0.schema.json"),
-        ) {
-            "Schema resource missing"
-        }.use { ContractMapper.json.readTree(it) }
-    }
+    /**
+     * The bundled form of the contract at [root]. It is [Outcome.Nok] when the root cannot be read, and on any
+     * other error, such as an include without a match or a name declared twice.
+     */
+    fun read(root: Path): Outcome<LocatedDocument> {
+        val document =
+            when (val read = LocatedDocument.readMapping(root)) {
+                is Outcome.Nok -> return read
+                is Outcome.Ok -> read.value
+            }
 
-    /** The JSON Schema dialect of the contract schema (2020-12), with format assertions and JSON Pointer locations. */
-    internal val schemaRegistry: SchemaRegistry =
-        SchemaRegistry.withDefaultDialect(SpecificationVersion.DRAFT_2020_12) {
-            it.schemaRegistryConfig(
-                SchemaRegistryConfig
-                    .builder()
-                    .formatAssertionsEnabled(true)
-                    .pathType(PathType.JSON_POINTER)
-                    .build(),
-            )
+        val include =
+            document.root.get(Keys.INCLUDE)
+                ?: return Outcome.Ok(document)
+
+        // The bundled form drops `include`, so the JSON Schema of the whole contract never sees it: it is checked here.
+        val invalid = ContractSchema.check(ContractSchema.include, include, document, "/${Keys.INCLUDE}")
+        if (invalid.isNotEmpty()) {
+            return Outcome.Nok(invalid)
         }
 
-    /** The schema of the root's `include` (K5.2). */
-    private val includeSchema: Schema by lazy {
-        val include =
-            (contractSchema.path("properties").path("include") as ObjectNode).deepCopy().apply {
-                put("\$schema", contractSchema.path("\$schema").asString())
+        val unmatched = mutableListOf<Diagnostic>()
+        val matches = matches(root, include)
+        matches.forEachIndexed { index, found ->
+            if (found.isEmpty()) {
+                unmatched +=
+                    Diagnostic.error(
+                        code = Code.INCLUDE_NO_MATCH,
+                        message = "include '${include.get(index).asString()}' matches no file",
+                        location = document.locate("/${Keys.INCLUDE}/$index"),
+                    )
             }
+        }
 
-        schemaRegistry.getSchema(include)
-    }
+        val bundle = Bundle(document)
+        inReadingOrder(root, matches).forEach { bundle.add(it) }
 
-    private val fragmentSchema: Schema by lazy {
-        val schema = contractSchema
-
-        val fragment =
-            ContractMapper.json.createObjectNode().apply {
-                set("\$defs", schema.get("\$defs"))
-                set("properties", schema.get("properties"))
-                put("\$ref", "#/\$defs/fragment")
-            }
-
-        schemaRegistry.getSchema(fragment)
+        return Outcome.of(bundle.document(), unmatched + bundle.diagnostics)
     }
 
     /**
-     * The bundled form of the contract at [root], or null when the root cannot be read. Findings,
-     * such as an include without a match or a name declared twice, go to [diagnostics].
+     * Every file a run over the contract at [root] depends on, for build tools that track their inputs: the root,
+     * its `rialto.lock`, its fragments and its local sources, a migrations glob (K1.9) as each file it matches. A
+     * remote source is tracked through its hash in the lock (K4). A root that does not exist yields only itself; one
+     * that cannot be read yields itself and its lock, so a build still notices when either changes.
      */
-    fun read(
-        root: Path,
-        diagnostics: Diagnostics,
-    ): LocatedDocument? {
-        val document =
-            try {
-                LocatedDocument.readMapping(root)
-            } catch (e: Exception) {
-                diagnostics.error(Code.UNREADABLE, e.message ?: "cannot be read", Location(root))
-                return null
-            }
-
-        val include = document.root.get("include") ?: return document
-        // The bundled form drops `include`, so the JSON Schema of the whole contract never sees it: it is checked here.
-        val invalid = includeSchema.validate(include)
-        invalid.forEach { message ->
-            diagnostics.error(
-                Code.SCHEMA,
-                message.message,
-                document.locate("/include" + pointer(message.instanceLocation.toString())),
-            )
+    fun inputs(root: Path): List<Path> {
+        if (!root.exists()) {
+            return listOf(root)
         }
 
-        if (invalid.isNotEmpty()) return document
-        val bundle = Bundle(document)
-        fragments(root, include, document, diagnostics).forEach { bundle.add(it, diagnostics) }
+        val base = root.toAbsolutePath().parent
+        val lock = base.resolve(RemoteSources.LOCK_FILE)
+        val document =
+            when (val read = LocatedDocument.readMapping(root)) {
+                is Outcome.Nok -> return listOf(root, lock)
+                is Outcome.Ok -> read.value
+            }
 
-        return bundle.document()
+        val sources =
+            document.root
+                .path(Keys.SOURCES)
+                .mapNotNull { it.get(Keys.PATH)?.asString() }
+                .filterNot(RemoteSources::isRemote)
+                .flatMap { path ->
+                    if ('*' in path) {
+                        migrations(base, path)
+                    } else {
+                        listOf(base.resolve(path).normalize())
+                    }
+                }
+
+        return buildList {
+            addAll(listOf(root, lock))
+            addAll(fragmentsOf(root, document))
+            addAll(sources)
+        }
     }
 
-    /** The fragments of the contract at [root], for build tools that track their inputs; empty without `include`. */
-    fun fragments(root: Path): List<Path> {
-        val document = runCatching { LocatedDocument.read(root) }.getOrNull() ?: return emptyList()
-        val include = document.root.get("include") ?: return emptyList()
-        return fragments(root, include, document, Diagnostics())
+    /** The fragments of the contract at [root]; empty without `include` or when the root cannot be read. */
+    internal fun fragments(root: Path): List<Path> =
+        when (val read = LocatedDocument.readMapping(root)) {
+            is Outcome.Nok -> emptyList()
+            is Outcome.Ok -> fragmentsOf(root, read.value)
+        }
+
+    /** The fragments the `include` of [document] lists; empty without `include`. */
+    private fun fragmentsOf(
+        root: Path,
+        document: LocatedDocument,
+    ): List<Path> {
+        val include = document.root.get(Keys.INCLUDE) ?: return emptyList()
+        return inReadingOrder(root, matches(root, include))
     }
 
-    /** Writes the bundled form of the contract at [root] to [output] (`rialto bundle`); false when it has errors. */
+    /**
+     * Writes the bundled form of the contract at [root] to [output] (`rialto bundle`). It is [Outcome.Ok] with
+     * [output] when the file was written, and [Outcome.Nok] when the contract has errors; then nothing is written.
+     *
+     * @throws java.io.IOException when [output] or its directory cannot be written. That is not a finding about the
+     *   contract, so it is not part of the outcome.
+     */
     fun bundle(
         root: Path,
         output: Path,
-        diagnostics: Diagnostics,
-    ): Boolean {
-        val document = read(root, diagnostics) ?: return false
-        if (diagnostics.hasErrors) return false
+    ): Outcome<Path> {
+        val read =
+            when (val read = read(root)) {
+                is Outcome.Nok -> return read
+                is Outcome.Ok -> read
+            }
+
+        val document = read.value
         val target = output.toAbsolutePath().normalize().parent
         Files.createDirectories(target)
 
         // Local source paths are relative to the contract, so they follow it to its new place.
         val from = root.toAbsolutePath().normalize().parent
         val bundled = (document.root as ObjectNode).deepCopy()
-        bundled.path("sources").forEach { source ->
-            val path = source.path("path").asString()
+        bundled.path(Keys.SOURCES).forEach { source ->
+            val path = source.path(Keys.PATH).asString()
             if (source is ObjectNode && path.isNotEmpty() && !RemoteSources.isRemote(path)) {
-                source.put(
-                    "path",
-                    target.relativize(from.resolve(path).normalize()).joinToString("/"),
-                )
+                source.put(Keys.PATH, relativePath(target, from.resolve(path)))
             }
         }
 
         output.writeText(ContractMapper.yaml.writeValueAsString(bundled))
-        return true
-    }
-
-    private fun fragments(
-        root: Path,
-        include: JsonNode,
-        document: LocatedDocument,
-        diagnostics: Diagnostics,
-    ): List<Path> {
-        val base = root.toAbsolutePath().normalize().parent
-        val self = root.toAbsolutePath().normalize()
-        val candidates =
-            Files.walk(base).use { files ->
-                files
-                    .filter { it.isRegularFile() && it != self }
-                    .map { base.relativize(it).joinToString("/") }
-                    .toList()
-            }
-
-        val matched = sortedSetOf<String>()
-        include.forEachIndexed { index, pattern ->
-            val regex = glob(pattern.asString())
-            val found = candidates.filter { regex.matches(it) }
-
-            if (found.isEmpty()) {
-                diagnostics.error(
-                    Code.INCLUDE_NO_MATCH,
-                    "include '${pattern.asString()}' matches no file",
-                    document.locate("/include/$index"),
-                )
-            }
-
-            matched += found
-        }
-
-        return matched.map { base.resolve(it) }
+        return Outcome.Ok(output, read.diagnostics)
     }
 
     /**
-     * A path pattern of `include`: `*` within one segment, `**` any number of segments, also none. A final `**`
-     * matches every file below its directory.
+     * What each pattern of [include] matches, in the order of the patterns: the files as paths relative to the
+     * directory of [root]. A pattern without a match has an empty list.
      */
-    internal fun glob(pattern: String): Regex {
-        val segments = pattern.split('/')
-        val regex =
-            segments.withIndex().joinToString("") { (index, segment) ->
-                val last = index == segments.lastIndex
-                when {
-                    segment == "**" && last -> {
-                        "(?:[^/]+/)*[^/]+"
-                    }
-                    segment == "**" -> {
-                        "(?:[^/]+/)*"
-                    }
-                    else -> {
-                        segment.split('*').joinToString("[^/]*") { Regex.escape(it) } +
-                            if (last) "" else "/"
-                    }
-                }
-            }
-
-        return Regex(regex)
+    private fun matches(
+        root: Path,
+        include: JsonNode,
+    ): List<List<String>> {
+        val base = root.toAbsolutePath().normalize().parent
+        val self = root.toAbsolutePath().normalize()
+        return include.values().map { pattern ->
+            // A fragment lies below the root's directory, and is never the root itself.
+            Glob
+                .files(base, pattern.asString())
+                .filter { it.startsWith(base) && it != self }
+                .map { relativePath(base, it) }
+        }
     }
 
-    /** The JSON Pointer of a schema finding: the root as the empty pointer. */
-    private fun pointer(location: String): String =
-        location.takeUnless { it == "/" || it == "$" } ?: ""
+    /** The fragments of [matches] in reading order: sorted by relative path, each file once. */
+    private fun inReadingOrder(
+        root: Path,
+        matches: List<List<String>>,
+    ): List<Path> {
+        val base = root.toAbsolutePath().normalize().parent
+        return matches.flatten().toSortedSet().map { base.resolve(it) }
+    }
 
-    /** The root with the fragments merged into it, in reading order. */
+    /**
+     * The root with the fragments merged into it, in reading order. Each fragment is checked on its own first
+     * (version, root-only keys, fragment schema); then it's named elements join their section, its `mappings`
+     * are appended, and any other section may come from one file only. [owner] remembers who declared what, so a
+     * name declared twice is reported with the file of its first declaration.
+     */
     private class Bundle(
         private val root: LocatedDocument,
     ) {
-        private val merged = (root.root as ObjectNode).deepCopy().apply { remove("include") }
+        private val merged = (root.root as ObjectNode).deepCopy().apply { remove(Keys.INCLUDE) }
 
         private val positions =
             root.positions
                 .filterKeys {
-                    it != "/include" &&
-                        !it.startsWith("/include/")
+                    it != "/${Keys.INCLUDE}" &&
+                        !it.startsWith("/${Keys.INCLUDE}/")
                 }.toMutableMap()
 
         /** Who declared each element of a keyed section (`types/Thing`) and each other top-level key. */
         private val owner = mutableMapOf<String, Path>()
 
+        private val collected = Diagnostics()
+
+        /** Every finding of the fragments added so far, in order. */
+        val diagnostics: List<Diagnostic> get() = collected.all
+
         init {
             merged.propertyNames().forEach { key ->
                 if (key in keyed) {
                     merged.get(key).propertyNames().forEach { owner["$key/$it"] = root.file }
-                } else if (key != "mappings") {
+                } else if (key != Keys.MAPPINGS) {
                     owner[key] = root.file
                 }
             }
         }
 
-        fun add(
-            file: Path,
-            diagnostics: Diagnostics,
-        ) {
+        /**
+         * Merges the fragment [file] into the bundle. A fragment with a wrong version, a root-only key or a schema
+         * error adds nothing; a name it declares twice is left out, the rest is merged.
+         */
+        fun add(file: Path) {
             val fragment =
-                try {
-                    LocatedDocument.readMapping(file)
-                } catch (e: Exception) {
-                    diagnostics.error(
-                        Code.UNREADABLE,
-                        e.message ?: "cannot be read",
-                        Location(file),
-                    )
-                    return
+                when (val read = LocatedDocument.readMapping(file)) {
+                    is Outcome.Nok -> {
+                        read.diagnostics.forEach { collected.add(it) }
+
+                        return
+                    }
+                    is Outcome.Ok -> {
+                        read.value
+                    }
                 }
 
-            val version = fragment.root.path("rialto").asString("")
-            val expected = root.root.path("rialto").asString("")
+            val version = fragment.root.path(Keys.RIALTO).asString("")
+            val expected = root.root.path(Keys.RIALTO).asString("")
             if (version != expected) {
-                diagnostics.error(
+                collected.error(
                     Code.UNSUPPORTED_VERSION,
                     "Fragment has format '$version', the root '$expected'",
-                    fragment.locate("/rialto"),
+                    fragment.locate("/${Keys.RIALTO}"),
                 )
                 return
             }
@@ -284,30 +276,30 @@ object ContractFiles {
                     .filter { it in rootOnly }
                     .toList()
             misplaced.forEach { key ->
-                diagnostics.error(
+                collected.error(
                     Code.FRAGMENT_ROOT_KEY,
                     "'$key' belongs in the root, not in a fragment",
                     fragment.locate("/${LocatedDocument.segment(key)}"),
                 )
             }
 
-            if (misplaced.isNotEmpty()) return
-            val invalid = fragmentSchema.validate(fragment.root)
-            invalid.forEach { message ->
-                diagnostics.error(
-                    Code.SCHEMA,
-                    message.message,
-                    fragment.locate(pointer(message.instanceLocation.toString())),
-                )
+            if (misplaced.isNotEmpty()) {
+                return
             }
 
-            if (invalid.isNotEmpty()) return
+            val invalid = ContractSchema.check(ContractSchema.fragment, fragment.root, fragment)
+            invalid.forEach { collected.add(it) }
+
+            if (invalid.isNotEmpty()) {
+                return
+            }
+
             fragment.root.properties().forEach { (key, value) ->
                 when (key) {
-                    "rialto" -> Unit
-                    in keyed -> section(fragment, key, value, diagnostics)
-                    "mappings" -> mappings(fragment, value as ArrayNode)
-                    else -> single(fragment, key, value, diagnostics)
+                    Keys.RIALTO -> Unit
+                    in keyed -> section(fragment, key, value)
+                    Keys.MAPPINGS -> mappings(fragment, value as ArrayNode)
+                    else -> single(fragment, key, value)
                 }
             }
         }
@@ -318,14 +310,21 @@ object ContractFiles {
             fragment: LocatedDocument,
             key: String,
             value: JsonNode,
-            diagnostics: Diagnostics,
         ) {
-            val section = merged.get(key) as? ObjectNode ?: merged.putObject(key)
+            // A section of the root that is no mapping stays as it is: the JSON Schema reports it afterwards, and
+            // replacing it by the elements of the fragment would hide the mistake.
+            val section =
+                when (val existing = merged.get(key)) {
+                    null -> merged.putObject(key)
+                    is ObjectNode -> existing
+                    else -> return
+                }
+
             value.properties().forEach { (name, element) ->
                 val pointer = "/$key/${LocatedDocument.segment(name)}"
                 val previous = owner["$key/$name"]
                 if (previous != null) {
-                    diagnostics.error(
+                    collected.error(
                         Code.DUPLICATE_NAME,
                         "'$name' is already declared under $key in ${relative(previous)}",
                         fragment.locate(pointer),
@@ -343,9 +342,16 @@ object ContractFiles {
             fragment: LocatedDocument,
             value: ArrayNode,
         ) {
-            val mappings = merged.get("mappings") as? ArrayNode ?: merged.putArray("mappings")
+            // As for a section: `mappings` of the root that is no list stays for the JSON Schema to report.
+            val mappings =
+                when (val existing = merged.get(Keys.MAPPINGS)) {
+                    null -> merged.putArray(Keys.MAPPINGS)
+                    is ArrayNode -> existing
+                    else -> return
+                }
+
             value.forEachIndexed { index, mapping ->
-                copy(fragment, "/mappings/$index", "/mappings/${mappings.size()}")
+                copy(fragment, "/${Keys.MAPPINGS}/$index", "/${Keys.MAPPINGS}/${mappings.size()}")
                 mappings.add(mapping)
             }
         }
@@ -354,12 +360,11 @@ object ContractFiles {
             fragment: LocatedDocument,
             key: String,
             value: JsonNode,
-            diagnostics: Diagnostics,
         ) {
             val pointer = "/${LocatedDocument.segment(key)}"
             val previous = owner[key]
             if (previous != null) {
-                diagnostics.error(
+                collected.error(
                     Code.SECTION_TWICE,
                     "'$key' is already declared in ${relative(previous)}; it belongs in one file",
                     fragment.locate(pointer),
@@ -373,14 +378,7 @@ object ContractFiles {
         }
 
         /** [file] relative to the root's directory, as a contract author reads it. */
-        private fun relative(file: Path): String =
-            root.file
-                .toAbsolutePath()
-                .normalize()
-                .parent
-                .relativize(
-                    file.toAbsolutePath().normalize(),
-                ).joinToString("/")
+        private fun relative(file: Path): String = relativePath(root.file.toAbsolutePath().parent, file)
 
         /** Copies the positions of [from] and everything below it in [fragment] to [to] in the bundle. */
         private fun copy(
@@ -397,3 +395,14 @@ object ContractFiles {
         }
     }
 }
+
+/** The path of [file] relative to [directory], with `/` as separator, as contracts and diagnostics write paths. */
+fun relativePath(
+    directory: Path,
+    file: Path,
+): String =
+    directory
+        .toAbsolutePath()
+        .normalize()
+        .relativize(file.toAbsolutePath().normalize())
+        .joinToString("/")

@@ -13,6 +13,9 @@
 
 package dev.buijs.rialto.contract
 
+import io.mockk.every
+import io.mockk.mockkObject
+import io.mockk.unmockkObject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
@@ -52,7 +55,7 @@ class ContractValidatorTest {
             DynamicTest.dynamicTest(file.parent.name + "/" + file.name) {
                 val result = ContractValidator.validate(file)
                 assertThat(result.diagnostics).isEmpty()
-                assertThat(result.valid).isTrue()
+                assertThat(result).isInstanceOf(Outcome.Ok::class.java)
             }
         }
 
@@ -70,7 +73,7 @@ class ContractValidatorTest {
 
                 assertThat(expected).isNotEmpty()
                 val result = ContractValidator.validate(file)
-                assertThat(result.valid).isFalse()
+                assertThat(result).isInstanceOf(Outcome.Nok::class.java)
                 assertThat(result.diagnostics.map { it.code.id }).containsAll(expected)
             }
         }
@@ -82,7 +85,7 @@ class ContractValidatorTest {
                 shipment.resolve("shipment.rialto.yaml"),
             )
         assertThat(result.diagnostics).isEmpty()
-        assertThat(result.contract!!.operations).containsKey("approveShipment")
+        assertThat(result.valueOrFail().contract.operations).containsKey("approveShipment")
     }
 
     @Test
@@ -91,7 +94,7 @@ class ContractValidatorTest {
         assertThat(ContractValidator.validate(split).diagnostics).isEmpty()
 
         val bundled =
-            (ContractFiles.read(split, Diagnostics())!!.root as ObjectNode).deepCopy().apply {
+            (ContractFiles.read(split).valueOrFail().root as ObjectNode).deepCopy().apply {
                 remove("sources")
             }
 
@@ -109,14 +112,8 @@ class ContractValidatorTest {
         work: Path,
     ) {
         val output = work.resolve("out/shipment.rialto.yaml")
-        val diagnostics = Diagnostics()
-        val written =
-            ContractFiles.bundle(
-                shipment.resolve("split/shipment.rialto.yaml"),
-                output,
-                diagnostics,
-            )
-        assertThat(written).isTrue()
+        val written = ContractFiles.bundle(shipment.resolve("split/shipment.rialto.yaml"), output)
+        assertThat(written).isEqualTo(Outcome.Ok(output))
         assertThat(ContractValidator.validate(output).diagnostics).isEmpty()
     }
 
@@ -159,18 +156,18 @@ class ContractValidatorTest {
     @Test
     fun `include paths match within a segment with star and across segments with two`() {
         assertThat(
-            ContractFiles.glob("parts/*.rialto.yaml").matches("parts/a.rialto.yaml"),
+            Glob.regex("parts/*.rialto.yaml").matches("parts/a.rialto.yaml"),
         ).isTrue()
         assertThat(
-            ContractFiles.glob("parts/*.rialto.yaml").matches("parts/x/a.rialto.yaml"),
+            Glob.regex("parts/*.rialto.yaml").matches("parts/x/a.rialto.yaml"),
         ).isFalse()
         assertThat(
-            ContractFiles.glob("contract/**/*.rialto.yaml").matches("contract/a.rialto.yaml"),
+            Glob.regex("contract/**/*.rialto.yaml").matches("contract/a.rialto.yaml"),
         ).isTrue()
         assertThat(
-            ContractFiles.glob("contract/**/*.rialto.yaml").matches("contract/x/y/a.rialto.yaml"),
+            Glob.regex("contract/**/*.rialto.yaml").matches("contract/x/y/a.rialto.yaml"),
         ).isTrue()
-        assertThat(ContractFiles.glob("a.b.yaml").matches("aXb.yaml")).isFalse()
+        assertThat(Glob.regex("a.b.yaml").matches("aXb.yaml")).isFalse()
     }
 
     @Test
@@ -216,7 +213,8 @@ class ContractValidatorTest {
             ContractValidator
                 .validate(
                     shipment.resolve("shipment.rialto.yaml"),
-                ).contract!!
+                ).valueOrFail()
+                .contract
         listOf("openapi.json", "openapi-v1.json", "asyncapi.json", "schema.sql").forEach {
             java.nio.file.Files
                 .copy(shipment.resolve(it), work.resolve(it))
@@ -226,6 +224,45 @@ class ContractValidatorTest {
         ContractWriter.write(original, written)
         val reread = ContractValidator.validate(written)
         assertThat(reread.diagnostics).isEmpty()
-        assertThat(reread.contract).isEqualTo(original)
+        assertThat(reread.valueOrFail().contract).isEqualTo(original)
+    }
+
+    @Test
+    fun `the checks over the model are those of the format, before any profile`() {
+        assertThat(ContractValidator.checks).containsExactly(FormatChecks)
+    }
+
+    @Test
+    fun `a contract the model rejects after the JSON Schema stops before its sources are read`() {
+        mockkObject(ContractValidator)
+        try {
+            val misfit = Diagnostic.error(Code.SCHEMA, "misfit", Location(Path.of("c.yaml")))
+            every { ContractValidator.model(any()) } returns Outcome.Nok(listOf(misfit))
+            val result = ContractValidator.validate(shipment.resolve("shipment.rialto.yaml"))
+
+            assertThat(result).isEqualTo(Outcome.Nok(listOf(misfit)))
+        } finally {
+            unmockkObject(ContractValidator)
+        }
+    }
+
+    @Test
+    fun `a misfit names the path into lists, and none for a document that is no mapping`() {
+        val file = Path.of("c.yaml")
+        val inList =
+            ContractValidator.model(
+                LocatedDocument.parse(
+                    file,
+                    "rialto: x\ninfo: {name: x, version: x}\nmappings: [{}]\n",
+                ),
+            )
+        val notAMapping = ContractValidator.model(LocatedDocument.parse(file, "- a\n"))
+
+        assertThat(
+            inList.diagnostics.single().message,
+        ).contains("does not fit the contract model at /mappings/0")
+        assertThat(
+            notAMapping.diagnostics.single().message,
+        ).startsWith("the contract passes the JSON Schema but does not fit the contract model: ")
     }
 }

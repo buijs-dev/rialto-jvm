@@ -19,18 +19,12 @@ import org.gradle.testkit.runner.TaskOutcome
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
-import java.nio.file.Path
 
 class RialtoPluginFunctionalTest {
     @TempDir
     lateinit var project: File
 
-    private val contracts =
-        Path
-            .of(
-                System.getProperty("rialto.spec"),
-            ).resolve("examples/contracts")
-            .toFile()
+    private val contracts = testContracts()
 
     /** A project whose contract is [contract], a test contract copied with the support documents next to it. */
     private fun setup(contract: String) {

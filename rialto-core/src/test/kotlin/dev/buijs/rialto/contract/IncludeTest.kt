@@ -66,9 +66,9 @@ class IncludeTest {
                 "parts/ignored.yaml" to "not: [a fragment\n",
             ),
         )
-        val diagnostics = Diagnostics()
-        val document = ContractFiles.read(contract, diagnostics)!!
-        assertThat(diagnostics.all).isEmpty()
+        val read = ContractFiles.read(contract)
+        assertThat(read.diagnostics).isEmpty()
+        val document = read.valueOrFail()
         assertThat(
             document.root
                 .propertyNames()
@@ -99,7 +99,7 @@ class IncludeTest {
                 .toString(),
         ).isEqualTo("b.rialto.yaml")
         assertThat(document.locate("/info").file).isEqualTo(contract)
-        assertThat(ContractValidator.validate(contract).valid).isTrue()
+        assertThat(ContractValidator.validate(contract)).isInstanceOf(Outcome.Ok::class.java)
     }
 
     @Test
@@ -123,7 +123,7 @@ class IncludeTest {
     @Test
     fun `a root without include is read as it is`() {
         write("$ROOT$THING")
-        val document = ContractFiles.read(contract, Diagnostics())!!
+        val document = ContractFiles.read(contract).valueOrFail()
         assertThat(document.locate("/types/Thing").line).isEqualTo(4)
         assertThat(document.locate("/types/Thing").column).isEqualTo(3)
     }
@@ -189,6 +189,20 @@ class IncludeTest {
             listOf("RIALTO-K008", "parts/a.yaml", "/info", 2),
             listOf("RIALTO-K008", "parts/a.yaml", "/sources", 3),
             listOf("RIALTO-K008", "parts/a.yaml", "/include", 5),
+        )
+    }
+
+    @Test
+    fun `a section of the root with the wrong type is still reported, also when a fragment has that section`() {
+        val mapping = "mappings:\n- {source: Thing, target: Thing, direction: both}\n"
+        write(
+            "${ROOT}types: 42\nmappings: none\ninclude: [parts/*.yaml]\n",
+            mapOf("parts/a.yaml" to "$FRAGMENT$THING$mapping"),
+        )
+
+        assertThat(findings()).containsExactly(
+            listOf("RIALTO-K002", "contract.rialto.yaml", "/mappings", 4),
+            listOf("RIALTO-K002", "contract.rialto.yaml", "/types", 3),
         )
     }
 
@@ -302,9 +316,7 @@ class IncludeTest {
             mapOf("parts/a.yaml" to "$FRAGMENT$THING"),
         )
         val output = work.resolve("out/deeper/bundled.rialto.yaml")
-        val diagnostics = Diagnostics()
-        assertThat(ContractFiles.bundle(contract, output, diagnostics)).isTrue()
-        assertThat(diagnostics.all).isEmpty()
+        assertThat(ContractFiles.bundle(contract, output)).isEqualTo(Outcome.Ok(output))
         val bundled = LocatedDocument.read(output).root
         assertThat(bundled.has("include")).isFalse()
         assertThat(
@@ -324,7 +336,7 @@ class IncludeTest {
     fun `bundle writes a contract without sources or include as it is`() {
         write("$ROOT$THING")
         val output = work.resolve("copy.rialto.yaml")
-        assertThat(ContractFiles.bundle(contract, output, Diagnostics())).isTrue()
+        assertThat(ContractFiles.bundle(contract, output)).isEqualTo(Outcome.Ok(output))
         assertThat(LocatedDocument.read(output).root).isEqualTo(LocatedDocument.read(contract).root)
     }
 
@@ -332,12 +344,12 @@ class IncludeTest {
     fun `bundle writes nothing when the contract has errors or cannot be read`() {
         val output = work.resolve("out.rialto.yaml")
         write("${ROOT}include: [missing/*.yaml]\n")
-        val diagnostics = Diagnostics()
-        assertThat(ContractFiles.bundle(contract, output, diagnostics)).isFalse()
-        assertThat(diagnostics.all.single().code).isEqualTo(Code.INCLUDE_NO_MATCH)
-        val unreadable = Diagnostics()
-        assertThat(ContractFiles.bundle(work.resolve("missing.yaml"), output, unreadable)).isFalse()
-        assertThat(unreadable.all.single().code).isEqualTo(Code.UNREADABLE)
+        val noMatch = ContractFiles.bundle(contract, output)
+        assertThat(noMatch).isInstanceOf(Outcome.Nok::class.java)
+        assertThat(noMatch.diagnostics.single().code).isEqualTo(Code.INCLUDE_NO_MATCH)
+        val unreadable = ContractFiles.bundle(work.resolve("missing.yaml"), output)
+        assertThat(unreadable).isInstanceOf(Outcome.Nok::class.java)
+        assertThat(unreadable.diagnostics.single().code).isEqualTo(Code.UNREADABLE)
         assertThat(output.exists()).isFalse()
     }
 
@@ -358,9 +370,90 @@ class IncludeTest {
             ("[ab].yaml" to "a.yaml") to false,
         ).forEach { (input, matches) ->
             assertThat(
-                ContractFiles.glob(input.first).matches(input.second),
+                Glob.regex(input.first).matches(input.second),
             ).describedAs("$input").isEqualTo(matches)
         }
+    }
+
+    @Test
+    fun `the inputs of a build are the root, its lock, its fragments and its local sources`() {
+        write(
+            ROOT +
+                "sources:\n" +
+                "  api: {kind: openapi, path: api.json}\n" +
+                "  remote: {kind: openapi, path: \"https://x.example/api.json\"}\n" +
+                "  db: {kind: sql, path: \"db/*.sql\"}\n" +
+                "  odd: {kind: sql}\n" +
+                "include: [parts/*.yaml]\n",
+            mapOf(
+                "parts/a.yaml" to FRAGMENT,
+                "api.json" to "{}",
+                "db/V2__b.sql" to "",
+                "db/V1__a.sql" to "",
+            ),
+        )
+
+        assertThat(
+            ContractFiles.inputs(contract).map {
+                work.relativize(it.toAbsolutePath()).joinToString("/")
+            },
+        ).containsExactly(
+            "contract.rialto.yaml",
+            "rialto.lock",
+            "parts/a.yaml",
+            "api.json",
+            "db/V1__a.sql",
+            "db/V2__b.sql",
+        )
+    }
+
+    @Test
+    fun `a root that does not exist is its only input, and one that cannot be read comes with its lock`() {
+        assertThat(ContractFiles.inputs(contract)).containsExactly(contract)
+        write("- a list\n")
+        assertThat(
+            ContractFiles.inputs(contract),
+        ).containsExactly(contract, work.resolve("rialto.lock"))
+    }
+
+    @Test
+    fun `an include never reaches outside the root's directory`() {
+        val root = work.resolve("root").createDirectories().resolve("contract.rialto.yaml")
+        root.writeText("${ROOT}include: [../outside/*.yaml]\n")
+        work
+            .resolve("outside")
+            .createDirectories()
+            .resolve("a.yaml")
+            .writeText("$FRAGMENT$THING")
+
+        assertThat(ContractValidator.validate(root).diagnostics.map { it.code })
+            .containsExactly(Code.INCLUDE_NO_MATCH)
+    }
+
+    @Test
+    fun `mappings of the root come first, then those of the fragments`() {
+        val mapping = "mappings:\n- {source: Thing, target: Thing, direction: both}\n"
+        write(
+            "$ROOT$THING${mapping}include: [parts/*.yaml]\n",
+            mapOf("parts/a.yaml" to "$FRAGMENT$mapping"),
+        )
+        val read = ContractFiles.read(contract)
+        assertThat(read.diagnostics).isEmpty()
+        val document = read.valueOrFail()
+
+        assertThat(document.root.path("mappings").size()).isEqualTo(2)
+        assertThat(document.locate("/mappings/1").file).isEqualTo(work.resolve("parts/a.yaml"))
+    }
+
+    @Test
+    fun `bundle leaves a source it cannot move as it is`() {
+        write(ROOT + "sources: {odd: 1, bare: {kind: openapi}}\n")
+        val output = work.resolve("out/bundled.rialto.yaml")
+
+        assertThat(ContractFiles.bundle(contract, output)).isEqualTo(Outcome.Ok(output))
+        assertThat(
+            LocatedDocument.read(output).root.path("sources"),
+        ).isEqualTo(LocatedDocument.read(contract).root.path("sources"))
     }
 
     private companion object {

@@ -13,6 +13,36 @@
 
 package dev.buijs.rialto.contract
 
+/** The tables that are read so far, by lower-case name. */
+private typealias Tables = MutableMap<String, Columns>
+
+/** The columns of one table, by lower-case name, in declaration order. */
+private typealias Columns = MutableMap<String, SqlColumn>
+
+/** The words a table constraint starts with: a definition that starts with one is no column. */
+private val CONSTRAINT_START =
+    setOf("primary", "foreign", "unique", "check", "constraint", "exclude", "like")
+
+/** The words that end the type of column definition. */
+private val COLUMN_CONSTRAINT =
+    setOf(
+        "not",
+        "null",
+        "primary",
+        "default",
+        "references",
+        "check",
+        "unique",
+        "constraint",
+        "generated",
+        "collate",
+    )
+
+private val SERIAL =
+    setOf("serial", "bigserial", "smallserial", "serial4", "serial8", "serial2")
+
+private val DOLLAR_TAG = Regex("""^\$[A-Za-z_]*\$""")
+
 /**
  * A column of an SQL table. [type] is the type name in lower case without length or precision,
  * such as `varchar` or `timestamp with time zone`; [hasDefault] is true for a `DEFAULT`, a
@@ -39,24 +69,22 @@ data class SqlTable(
  * Reads the schema that results from SQL statements in order (K1.9): `CREATE TABLE`, the `ALTER
  * TABLE` actions on columns, the primary key and the table name, and `DROP TABLE`. Every other
  * statement is skipped. Names are compared in lower case without schema or quotes.
+ *
+ * The persistence profile maps entities onto tables and columns, and the contract refers to those as
+ * `<source>#table.column`. To check such a reference, and the type and nullability of a column, the tooling needs
+ * the schema without a database: this is a small reader of the DDL found in migrations, not a full SQL parser.
  */
 object SqlSchema {
     /** The tables after running [sql], by lower-case name. */
     fun read(sql: String): Map<String, SqlTable> {
-        val tables = linkedMapOf<String, MutableMap<String, SqlColumn>>()
-        statements(sql).forEach { statement -> apply(tables, tokens(statement)) }
+        val tables = linkedMapOf<String, Columns>()
+        statements(sql).forEach { statement -> applyStatement(tables, tokens(statement)) }
 
         return tables.mapValues { (name, columns) -> SqlTable(name, columns.toMap()) }
     }
 
-    /** The names of the tables and their columns, as [read] finds them. */
-    fun tables(sql: String): Map<String, Set<String>> =
-        read(sql).mapValues { it.value.columns.keys }
-
-    // Statements --------------------------------------------------------------------------------
-
-    private fun apply(
-        tables: MutableMap<String, MutableMap<String, SqlColumn>>,
+    private fun applyStatement(
+        tables: Tables,
         tokens: List<String>,
     ) {
         val words = Words(tokens)
@@ -68,7 +96,7 @@ object SqlSchema {
     }
 
     private fun createTable(
-        tables: MutableMap<String, MutableMap<String, SqlColumn>>,
+        tables: Tables,
         words: Words,
     ) {
         // CREATE [GLOBAL | LOCAL] [TEMP | TEMPORARY | UNLOGGED] TABLE
@@ -76,32 +104,41 @@ object SqlSchema {
             words.next()
         }
 
-        if (!words.accept("table")) return
+        if (!words.accept("table")) {
+            return
+        }
+
         val ifNotExists = words.accept("if", "not", "exists")
         val name = identifier(words.next() ?: return)
         val body = words.next()?.takeIf { it.startsWith("(") } ?: return
-        if (ifNotExists && name in tables) return
+        if (ifNotExists && name in tables) {
+            return
+        }
 
         val columns = linkedMapOf<String, SqlColumn>()
+        val primaryKey = mutableListOf<String>()
         split(body.substring(1, body.length - 1)).forEach { definition ->
+            // A definition is never blank: split leaves those out.
             val parts = tokens(definition)
-            if (parts.isEmpty()) return@forEach
             if (parts.first().lowercase() in CONSTRAINT_START) {
-                primaryKeyOf(parts)?.forEach { key -> columns.markPrimaryKey(key) }
+                primaryKey += primaryKeyOf(parts).orEmpty()
             } else {
                 column(parts)?.let { columns[it.name] = it }
             }
         }
 
+        // A table constraint may stand before the columns it names, so it is applied once every column is read.
+        primaryKey.forEach { columns.markPrimaryKey(it) }
+
         tables[name] = columns
     }
 
     private fun alterTable(
-        tables: MutableMap<String, MutableMap<String, SqlColumn>>,
+        tables: Tables,
         words: Words,
     ) {
-        words.accept("if", "exists")
-        words.accept("only")
+        words.skip("if", "exists")
+        words.skip("only")
         val name = identifier(words.next() ?: return)
         // RENAME TO renames the table itself; it is not combined with other actions.
         if (words.accept("rename", "to")) {
@@ -119,13 +156,16 @@ object SqlSchema {
     }
 
     private fun alterAction(
-        columns: MutableMap<String, SqlColumn>,
+        columns: Columns,
         words: Words,
     ) {
         when {
             words.accept("add") -> {
                 val parts = words.rest()
-                if (parts.isEmpty()) return
+                if (parts.isEmpty()) {
+                    return
+                }
+
                 if (parts.first().lowercase() in CONSTRAINT_START) {
                     primaryKeyOf(parts)?.forEach { columns.markPrimaryKey(it) }
 
@@ -133,28 +173,43 @@ object SqlSchema {
                 }
 
                 val definition = Words(parts)
-                definition.accept("column")
+                definition.skip("column")
                 val ifNotExists = definition.accept("if", "not", "exists")
-                val column = column(definition.rest()) ?: return
-                if (ifNotExists && column.name in columns) return
+                val column =
+                    column(definition.rest())
+                        ?: return
+
+                if (ifNotExists && column.name in columns) {
+                    return
+                }
+
                 columns[column.name] = column
             }
             words.accept("drop") -> {
-                if (words.peek() == "constraint") return
-                words.accept("column")
-                words.accept("if", "exists")
+                if (words.peek() == "constraint") {
+                    return
+                }
+
+                words.skip("column")
+                words.skip("if", "exists")
                 columns.remove(identifier(words.next() ?: return))
             }
             words.accept("rename") -> {
-                if (words.peek() == "constraint") return
-                words.accept("column")
+                if (words.peek() == "constraint") {
+                    return
+                }
+
+                words.skip("column")
                 val from = identifier(words.next() ?: return)
-                if (!words.accept("to")) return
+                if (!words.accept("to")) {
+                    return
+                }
+
                 val to = identifier(words.next() ?: return)
                 columns.remove(from)?.let { columns[to] = it.copy(name = to) }
             }
             words.accept("alter") -> {
-                words.accept("column")
+                words.skip("column")
                 val name = identifier(words.next() ?: return)
                 val column = columns[name] ?: return
                 alterColumn(column, words)?.let { columns[name] = it }
@@ -194,21 +249,22 @@ object SqlSchema {
         }
 
     private fun dropTable(
-        tables: MutableMap<String, MutableMap<String, SqlColumn>>,
+        tables: Tables,
         words: Words,
     ) {
-        words.accept("if", "exists")
+        words.skip("if", "exists")
         // DROP TABLE a, b [CASCADE]: the names are separated by commas.
         split(words.rest().joinToString(" ")).forEach { name ->
-            tokens(name).firstOrNull()?.let { tables.remove(identifier(it)) }
+            tables.remove(identifier(tokens(name).first()))
         }
     }
 
-    // Columns -----------------------------------------------------------------------------------
-
     /** A column definition: its name, its type and the column constraints after the type. */
     private fun column(parts: List<String>): SqlColumn? {
-        if (parts.size < 2) return null
+        if (parts.size < 2) {
+            return null
+        }
+
         val name = identifier(parts.first())
         val typeEnd =
             (1 until parts.size).firstOrNull { parts[it].lowercase() in COLUMN_CONSTRAINT }
@@ -234,7 +290,9 @@ object SqlSchema {
                 constraints.accept("generated") -> {
                     hasDefault = true
                     // An identity column is never null; a generated (expression) column can be.
-                    if (constraints.rest().any { it.lowercase() == "identity" }) notNull = true
+                    if (constraints.rest().any { it.lowercase() == "identity" }) {
+                        notNull = true
+                    }
                 }
                 else -> {
                     constraints.next()
@@ -256,26 +314,22 @@ object SqlSchema {
     /** The columns of a `PRIMARY KEY (...)` table constraint, optionally named, or null. */
     private fun primaryKeyOf(parts: List<String>): List<String>? {
         val words = Words(parts)
-        if (words.accept("constraint")) words.next()
-        if (!words.accept("primary", "key")) return null
+        if (words.accept("constraint")) {
+            words.next()
+        }
+
+        if (!words.accept("primary", "key")) {
+            return null
+        }
+
         val list = words.next()?.takeIf { it.startsWith("(") } ?: return null
         return split(list.substring(1, list.length - 1)).map { identifier(it.trim()) }
     }
 
-    private fun MutableMap<String, SqlColumn>.markPrimaryKey(name: String) {
+    private fun Columns.markPrimaryKey(name: String) {
         val key = identifier(name)
         this[key]?.let { this[key] = it.copy(primaryKey = true, notNull = true) }
     }
-
-    /** A table or column name in lower case, without schema and quotes. */
-    private fun identifier(text: String): String =
-        text
-            .trim()
-            .substringAfterLast('.')
-            .trim('"')
-            .lowercase()
-
-    // Lexing ------------------------------------------------------------------------------------
 
     /**
      * The statements of [sql], split on `;` outside quotes, comments and dollar-quoted bodies; the
@@ -328,42 +382,6 @@ object SqlSchema {
         return statements.map { it.trim() }.filter { it.isNotEmpty() }
     }
 
-    /** The end of a quoted string, identifier or dollar-quoted body starting at [start], or [start]. */
-    private fun quotedEnd(
-        sql: String,
-        start: Int,
-    ): Int {
-        val char = sql[start]
-        if (char == '\'' || char == '"') {
-            var index = start + 1
-            while (index < sql.length) {
-                if (sql[index] == char) {
-                    // A doubled quote is an escaped quote.
-                    if (index + 1 < sql.length && sql[index + 1] == char) {
-                        index += 2
-                        continue
-                    }
-
-                    return index + 1
-                }
-
-                index++
-            }
-
-            return sql.length
-        }
-
-        if (char == '$') {
-            val tag = DOLLAR_TAG.find(sql.substring(start, minOf(sql.length, start + 64)))
-            if (tag != null && tag.range.first == 0) {
-                val close = sql.indexOf(tag.value, start + tag.value.length)
-                return if (close < 0) sql.length else close + tag.value.length
-            }
-        }
-
-        return start
-    }
-
     /**
      * The tokens of one statement or definition: words, quoted strings and identifiers, and each
      * parenthesized group as one token, including its parentheses.
@@ -390,7 +408,10 @@ object SqlSchema {
                     val start = index
                     while (index < text.length) {
                         val c = text[index]
-                        if (c.isWhitespace() || c == '(' || c == ',') break
+                        if (c.isWhitespace() || c == '(' || c == ',') {
+                            break
+                        }
+
                         val quoted = quotedEnd(text, index)
                         index = if (quoted > index) quoted else index + 1
                     }
@@ -401,6 +422,40 @@ object SqlSchema {
         }
 
         return tokens
+    }
+
+    /** [text] split on commas outside parentheses and quotes. */
+    private fun split(text: String): List<String> {
+        val parts = mutableListOf<String>()
+        val current = StringBuilder()
+        var depth = 0
+        var index = 0
+        while (index < text.length) {
+            val quoted = quotedEnd(text, index)
+            if (quoted > index) {
+                current.append(text, index, quoted)
+                index = quoted
+                continue
+            }
+
+            val char = text[index]
+            when (char) {
+                '(' -> depth++
+                ')' -> depth--
+            }
+
+            if (char == ',' && depth == 0) {
+                parts += current.toString()
+                current.clear()
+            } else {
+                current.append(char)
+            }
+
+            index++
+        }
+
+        parts += current.toString()
+        return parts.filter { it.isNotBlank() }
     }
 
     /** The end of the parenthesized group that opens at [start]. */
@@ -428,86 +483,82 @@ object SqlSchema {
         return text.length
     }
 
-    /** [text] split on commas outside parentheses and quotes. */
-    private fun split(text: String): List<String> {
-        val parts = mutableListOf<String>()
-        val current = StringBuilder()
-        var depth = 0
-        var index = 0
-        while (index < text.length) {
-            val quoted = quotedEnd(text, index)
-            if (quoted > index) {
-                current.append(text, index, quoted)
-                index = quoted
-                continue
-            }
+    /** The end of a quoted string, identifier or dollar-quoted body starting at [start], or [start]. */
+    private fun quotedEnd(
+        sql: String,
+        start: Int,
+    ): Int {
+        val char = sql[start]
+        if (char == '\'' || char == '"') {
+            var index = start + 1
+            while (index < sql.length) {
+                if (sql[index] == char) {
+                    // A doubled quote is an escaped quote.
+                    if (index + 1 < sql.length && sql[index + 1] == char) {
+                        index += 2
+                        continue
+                    }
 
-            val char = text[index]
-            when {
-                char == '(' -> depth++
-                char == ')' -> depth--
-            }
-
-            if (char == ',' && depth == 0) {
-                parts += current.toString()
-                current.clear()
-            } else {
-                current.append(char)
-            }
-
-            index++
-        }
-
-        parts += current.toString()
-        return parts.filter { it.isNotBlank() }
-    }
-
-    /** A cursor over tokens, matching keywords case-insensitively. */
-    private class Words(
-        private val tokens: List<String>,
-    ) {
-        private var index = 0
-
-        val done: Boolean get() = index >= tokens.size
-
-        fun peek(): String? = tokens.getOrNull(index)?.lowercase()
-
-        fun next(): String? = tokens.getOrNull(index)?.also { index++ }
-
-        fun rest(): List<String> = tokens.subList(minOf(index, tokens.size), tokens.size)
-
-        /** Consumes [keywords] when the next tokens are exactly these, in order. */
-        fun accept(vararg keywords: String): Boolean {
-            val matches =
-                keywords.withIndex().all { (offset, keyword) ->
-                    tokens.getOrNull(index + offset)?.lowercase() == keyword
+                    return index + 1
                 }
 
-            if (matches) index += keywords.size
-            return matches
+                index++
+            }
+
+            return sql.length
         }
+
+        if (char == '$') {
+            val tag = DOLLAR_TAG.find(sql.substring(start, minOf(sql.length, start + 64)))
+            // The tag is anchored at the start: `$$` or `$name$`.
+            if (tag != null) {
+                val close = sql.indexOf(tag.value, start + tag.value.length)
+                return if (close < 0) sql.length else close + tag.value.length
+            }
+        }
+
+        return start
     }
 
-    private val CONSTRAINT_START =
-        setOf("primary", "foreign", "unique", "check", "constraint", "exclude", "like")
+    /** A table or column name in lower case, without schema and quotes. */
+    private fun identifier(text: String): String =
+        text
+            .trim()
+            .substringAfterLast('.')
+            .trim('"')
+            .lowercase()
+}
 
-    /** The words that end the type of a column definition. */
-    private val COLUMN_CONSTRAINT =
-        setOf(
-            "not",
-            "null",
-            "primary",
-            "default",
-            "references",
-            "check",
-            "unique",
-            "constraint",
-            "generated",
-            "collate",
-        )
+/** A cursor over tokens, matching keywords case-insensitively. */
+private class Words(
+    private val tokens: List<String>,
+) {
+    private var index = 0
 
-    private val SERIAL =
-        setOf("serial", "bigserial", "smallserial", "serial4", "serial8", "serial2")
+    val done: Boolean get() = index >= tokens.size
 
-    private val DOLLAR_TAG = Regex("""^\$[A-Za-z_]*\$""")
+    fun peek(): String? = tokens.getOrNull(index)?.lowercase()
+
+    fun next(): String? = tokens.getOrNull(index)?.also { index++ }
+
+    fun rest(): List<String> = tokens.subList(minOf(index, tokens.size), tokens.size)
+
+    /** Passes over [keywords] when they come next: an optional part of a statement. */
+    fun skip(vararg keywords: String) {
+        accept(*keywords)
+    }
+
+    /** Consumes [keywords] when the next tokens are exactly these, in order. */
+    fun accept(vararg keywords: String): Boolean {
+        val matches =
+            keywords.withIndex().all { (offset, keyword) ->
+                tokens.getOrNull(index + offset)?.lowercase() == keyword
+            }
+
+        if (matches) {
+            index += keywords.size
+        }
+
+        return matches
+    }
 }

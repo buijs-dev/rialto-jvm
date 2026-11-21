@@ -43,16 +43,20 @@ class SourcesTest {
         return ContractValidator.validate(contract).diagnostics
     }
 
+    /** The sources of the contract as last written, loaded without the checks, so also when it has errors. */
+    private fun load(): Sources {
+        val document = LocatedDocument.read(contract)
+        return Sources.load(ContractValidator.model(document).valueOrFail(), document)
+    }
+
     private val api = "  api: {kind: openapi, path: api.json, version: 1.0.0, status: current}\n"
     private val db = "  db: {kind: sql, path: schema.sql, dialect: postgresql}\n"
     private val thing =
         "types:\n  Thing: {kind: entity, identity: [id], properties: {id: {type: uuid}}}\n"
 
-    private fun mapping(source: String) =
-        "mappings:\n  - {source: '$source', target: Thing, direction: both}\n"
+    private fun mapping(source: String) = "mappings:\n  - {source: '$source', target: Thing, direction: both}\n"
 
-    private fun storage(table: String) =
-        "storage:\n  Thing: {table: '$table', columns: {id: public_id}}\n"
+    private fun storage(table: String) = "storage:\n  Thing: {table: '$table', columns: {id: public_id}}\n"
 
     @Test
     fun `a source that does not exist or cannot be parsed is RIALTO-S001 at its path`() {
@@ -83,12 +87,7 @@ class SourcesTest {
         ).isEqualTo("'/components/schemas/Other' does not exist in api.json")
         assertThat(missing.location.pointer).isEqualTo("/mappings/0/source")
 
-        val document =
-            Sources.load(
-                ContractValidator.validate(contract).contract!!,
-                LocatedDocument.read(contract),
-                Diagnostics(),
-            )
+        val document = load()
         assertThat(
             document.element("api#/components/schemas/Thing")!!.path("type").asString(),
         ).isEqualTo("object")
@@ -126,14 +125,11 @@ class SourcesTest {
         assertThat(column.message).isEqualTo("'thing.missing' does not exist in schema.sql")
         assertThat(column.location.pointer).isEqualTo("/storage/Thing/columns/id")
 
-        val sources =
-            Sources.load(
-                ContractValidator.validate(contract).contract!!,
-                LocatedDocument.read(contract),
-                Diagnostics(),
-            )
+        val sources = load()
         assertThat(sources.table("db#Thing")!!.columns.keys).containsExactly("public_id", "name")
-        assertThat((sources.loaded["db"] as LoadedSource.Sql).tables).isEqualTo(
+        assertThat(
+            (sources.loaded["db"] as LoadedSource.Sql).schema.mapValues { it.value.columns.keys },
+        ).isEqualTo(
             mapOf("thing" to setOf("public_id", "name")),
         )
     }
@@ -144,6 +140,8 @@ class SourcesTest {
         file("db/V10__rename.sql", "ALTER TABLE thing RENAME COLUMN second TO tenth;")
         file("db/V1__create.sql", "CREATE TABLE thing (public_id UUID PRIMARY KEY)")
         file("db/V1_1__more.sql", "ALTER TABLE thing ADD COLUMN first TEXT;")
+        // A timestamp as version is larger than an integer holds.
+        file("db/V20261120120000__stamp.sql", "ALTER TABLE thing ADD COLUMN stamped TEXT;")
         file("db/nested/V3__nested.sql", "ALTER TABLE thing ADD COLUMN third TEXT;")
         file("db/b_repeatable.sql", "ALTER TABLE thing ADD COLUMN later TEXT;")
         file("db/a_repeatable.sql", "ALTER TABLE thing ADD COLUMN earlier TEXT;")
@@ -157,24 +155,20 @@ class SourcesTest {
             "db/V2__add.sql",
             "db/nested/V3__nested.sql",
             "db/V10__rename.sql",
+            "db/V20261120120000__stamp.sql",
             "db/a_repeatable.sql",
             "db/b_repeatable.sql",
         )
-        assertThat(migrations(work, "db/*.sql")).hasSize(6)
-        assertThat(migrations(work, "db/**")).hasSize(8)
+        assertThat(migrations(work, "db/*.sql")).hasSize(7)
+        assertThat(migrations(work, "db/**")).hasSize(9)
         assertThat(migrations(work, "missing/*.sql")).isEmpty()
 
         val source = "  db: {kind: sql, path: 'db/**/*.sql', dialect: postgresql}\n"
         assertThat(validate(source, thing + storage("db#thing"))).isEmpty()
-        val sources =
-            Sources.load(
-                ContractValidator.validate(contract).contract!!,
-                LocatedDocument.read(contract),
-                Diagnostics(),
-            )
+        val sources = load()
         assertThat(
             sources.table("db#thing")!!.columns.keys,
-        ).containsExactly("public_id", "first", "third", "tenth", "earlier", "later")
+        ).containsExactly("public_id", "first", "third", "tenth", "stamped", "earlier", "later")
     }
 
     @Test
@@ -198,5 +192,16 @@ class SourcesTest {
         assertThat(diagnostic.code).isEqualTo(Code.UNRESOLVED_REFERENCE)
         assertThat(diagnostic.message).isEqualTo("Unknown source 'next'")
         assertThat(diagnostic.location.pointer).isEqualTo("/sources/api/successor")
+    }
+
+    @Test
+    fun `a reference into a source is its name and its location, for SQL a table and maybe a column`() {
+        assertThat(ExternalRef.of("db#Orders.Id")).matches {
+            it.source == "db" && it.location == "Orders.Id" && it.table == "orders" &&
+                it.column == "id"
+        }
+
+        assertThat(ExternalRef.of("db#orders").column).isNull()
+        assertThat(ExternalRef.of("api#/paths/~1a").location).isEqualTo("/paths/~1a")
     }
 }

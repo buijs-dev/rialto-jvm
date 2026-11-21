@@ -15,6 +15,7 @@ package dev.buijs.rialto.contract
 
 import tools.jackson.core.JsonParser
 import tools.jackson.core.JsonToken
+import tools.jackson.core.ObjectReadContext
 import tools.jackson.core.json.JsonFactory
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.node.ArrayNode
@@ -35,13 +36,21 @@ data class Position(
  * A YAML or JSON document as a tree, with the file, line and column of every element, so
  * diagnostics can point at the place a JSON Pointer refers to. For a contract over several files
  * ([ContractFiles]) [file] is the root and every position keeps the fragment it came from.
+ *
+ * Jackson's own trees forget where an element was read, and the JSON Schema and the checks report their
+ * findings as JSON Pointers. This class keeps both together, so a finding such as `#/types/Order/properties/id`
+ * reaches the author as `orders.rialto.yaml:12:7`. Contracts, fragments and OpenAPI and AsyncAPI sources are all
+ * read through it.
  */
 class LocatedDocument internal constructor(
     val file: Path,
     val root: JsonNode,
     internal val positions: Map<String, Position>,
 ) {
-    /** The location of [pointer], or of its nearest ancestor with a known position. */
+    /**
+     * The location of [pointer], or of its nearest ancestor with a known position: a missing property is
+     * reported at the element that should have it.
+     */
     fun locate(pointer: String): Location {
         var current = pointer
         while (true) {
@@ -49,7 +58,10 @@ class LocatedDocument internal constructor(
                 return Location(position.file, position.line, position.column, pointer)
             }
 
-            if (current.isEmpty()) return Location(file, pointer = pointer)
+            if (current.isEmpty()) {
+                return Location(file, pointer = pointer)
+            }
+
             current = current.substringBeforeLast('/', "")
         }
     }
@@ -71,6 +83,9 @@ class LocatedDocument internal constructor(
         /**
          * Parses [text] as the content of [file], which is not read: as JSON when its name ends in `.json`,
          * otherwise as YAML. For a document that is not read from a file.
+         *
+         * The text holds one document, and a mapping holds each key once. A second document, other content after
+         * the first, and a key that is used twice all throw: reading on would silently drop what the author wrote.
          */
         fun parse(
             file: Path,
@@ -83,86 +98,119 @@ class LocatedDocument internal constructor(
                     ContractMapper.yamlFactory
                 }
 
-            factory.createParser(text).use { parser ->
-                val lines = mutableMapOf<String, Pair<Int, Int>>()
+            factory.createParser(ObjectReadContext.empty(), text).use { parser ->
                 parser.nextToken() ?: return LocatedDocument(file, nodes.objectNode(), emptyMap())
-                val root = readValue(parser, "", lines)
-                val positions = lines.mapValues { (_, at) -> Position(file, at.first, at.second) }
+                val reader = TreeReader(file, parser)
+                val root = reader.readValue("")
 
-                return LocatedDocument(file, root, positions)
+                val after = parser.nextToken()
+                require(after == null) {
+                    val location = parser.currentTokenLocation()
+                    "Only one document is expected, but more follows at line ${location.lineNr}, " +
+                        "column ${location.columnNr}"
+                }
+
+                return LocatedDocument(file, root, reader.positions)
             }
         }
 
         /**
-         * Reads [file] like [read] and requires a mapping at the top, as every contract and fragment is.
-         * Anything else, such as a list or a single value, throws, which callers report as RIALTO-K001.
+         * Reads [file] like [read] and requires a mapping at the top, as every contract and fragment is: how each
+         * of them is read. A file that cannot be read or parsed, and anything other than a mapping, such as a list
+         * or a single value, is [Outcome.Nok] with one `RIALTO-K001`.
          */
-        fun readMapping(file: Path): LocatedDocument =
-            read(file).also { document ->
-                require(document.root.isObject) {
-                    val found =
-                        when {
-                            document.root.isArray -> "a list"
-                            document.root.isNull -> "null"
-                            else -> "a single value"
-                        }
-
-                    "The document is not a mapping but $found"
+        fun readMapping(file: Path): Outcome<LocatedDocument> {
+            val document =
+                try {
+                    read(file)
+                } catch (e: Exception) {
+                    return unreadable(file, e.message ?: "cannot be read")
                 }
+
+            if (!document.root.isObject) {
+                val found =
+                    when {
+                        document.root.isArray -> "a list"
+                        document.root.isNull -> "null"
+                        else -> "a single value"
+                    }
+
+                return unreadable(file, "The document is not a mapping but $found")
             }
+
+            return Outcome.Ok(document)
+        }
+
+        private fun unreadable(
+            file: Path,
+            message: String,
+        ): Outcome.Nok = Outcome.Nok(listOf(Diagnostic.error(Code.UNREADABLE, message, Location(file))))
 
         /** Escapes one JSON Pointer segment (RFC 6901). */
         fun segment(name: String): String = name.replace("~", "~0").replace("/", "~1")
+    }
+}
 
-        private fun readValue(
-            parser: JsonParser,
-            pointer: String,
-            positions: MutableMap<String, Pair<Int, Int>>,
-        ): JsonNode {
-            val location = parser.currentTokenLocation()
-            positions.putIfAbsent(pointer, location.lineNr to location.columnNr)
-            return when (parser.currentToken()) {
-                JsonToken.START_OBJECT -> readObject(parser, pointer, positions)
-                JsonToken.START_ARRAY -> readArray(parser, pointer, positions)
-                JsonToken.VALUE_STRING -> nodes.stringNode(parser.text)
-                JsonToken.VALUE_NUMBER_INT -> nodes.numberNode(parser.bigIntegerValue)
-                JsonToken.VALUE_NUMBER_FLOAT -> nodes.numberNode(parser.decimalValue)
-                JsonToken.VALUE_TRUE -> nodes.booleanNode(true)
-                JsonToken.VALUE_FALSE -> nodes.booleanNode(false)
-                else -> nodes.nullNode()
+/**
+ * Reads the tree of one document from [parser], and remembers per JSON Pointer where its element was read in
+ * [file].
+ */
+private class TreeReader(
+    private val file: Path,
+    private val parser: JsonParser,
+) {
+    private val nodes = JsonNodeFactory.instance
+
+    /** Where each element was read, by its JSON Pointer. */
+    val positions = mutableMapOf<String, Position>()
+
+    /** The position of the token the parser is at. */
+    private fun position(): Position {
+        val location = parser.currentTokenLocation()
+        return Position(file, location.lineNr, location.columnNr)
+    }
+
+    /** Reads the value the parser is at; [pointer] is where it is in the document. */
+    fun readValue(pointer: String): JsonNode {
+        // The position of a property is that of its name, which readObject has set already.
+        positions.putIfAbsent(pointer, position())
+        return when (parser.currentToken()) {
+            JsonToken.START_OBJECT -> readObject(pointer)
+            JsonToken.START_ARRAY -> readArray(pointer)
+            JsonToken.VALUE_STRING -> nodes.stringNode(parser.string)
+            JsonToken.VALUE_NUMBER_INT -> nodes.numberNode(parser.bigIntegerValue)
+            JsonToken.VALUE_NUMBER_FLOAT -> nodes.numberNode(parser.decimalValue)
+            JsonToken.VALUE_TRUE -> nodes.booleanNode(true)
+            JsonToken.VALUE_FALSE -> nodes.booleanNode(false)
+            else -> nodes.nullNode()
+        }
+    }
+
+    private fun readObject(pointer: String): ObjectNode {
+        val node = nodes.objectNode()
+        while (parser.nextToken() == JsonToken.PROPERTY_NAME) {
+            val name = parser.currentName()
+            val child = "$pointer/${LocatedDocument.segment(name)}"
+            val position = position()
+            require(!node.has(name)) {
+                "Duplicate key '$name' at line ${position.line}, column ${position.column}"
             }
+
+            positions[child] = position
+            parser.nextToken()
+            node.set(name, readValue(child))
         }
 
-        private fun readObject(
-            parser: JsonParser,
-            pointer: String,
-            positions: MutableMap<String, Pair<Int, Int>>,
-        ): ObjectNode {
-            val node = nodes.objectNode()
-            while (parser.nextToken() == JsonToken.PROPERTY_NAME) {
-                val name = parser.currentName()
-                val child = "$pointer/${segment(name)}"
-                val location = parser.currentTokenLocation()
-                positions[child] = location.lineNr to location.columnNr
-                parser.nextToken()
-                node.set(name, readValue(parser, child, positions))
-            }
+        return node
+    }
 
-            return node
+    private fun readArray(pointer: String): ArrayNode {
+        val node = nodes.arrayNode()
+        var index = 0
+        while (parser.nextToken() != JsonToken.END_ARRAY) {
+            node.add(readValue("$pointer/${index++}"))
         }
 
-        private fun readArray(
-            parser: JsonParser,
-            pointer: String,
-            positions: MutableMap<String, Pair<Int, Int>>,
-        ): ArrayNode {
-            val node = nodes.arrayNode()
-            var index = 0
-            while (parser.nextToken() != JsonToken.END_ARRAY) {
-                node.add(readValue(parser, "$pointer/${index++}", positions))
-            }
-
-            return node
-        }
+        return node
     }
 }
