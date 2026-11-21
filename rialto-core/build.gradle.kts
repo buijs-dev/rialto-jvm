@@ -1,5 +1,7 @@
 plugins {
     id("dev.buijs.conventions.library")
+    // The test contracts and the JSON Schema of the specification.
+    id("rialto-spec")
 }
 
 description = "Rialto tooling: the contract model, loading, bundling and validation of contracts"
@@ -13,15 +15,6 @@ dependencies {
 
     testImplementation(libs.bundles.test)
     testImplementation(kotlin("test"))
-}
-
-// The test contracts and the JSON Schema live in the specification repository.
-val spec = rootDir.resolve("../rialto-spec")
-
-tasks.test {
-    systemProperty("rialto.spec", spec.absolutePath)
-    inputs.dir(spec.resolve("examples")).withPropertyName("specExamples")
-    inputs.file(spec.resolve("spec/contract-1.0.0.schema.json")).withPropertyName("specSchema")
 }
 
 kover {

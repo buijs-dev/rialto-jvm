@@ -21,11 +21,6 @@ dependencies {
     testImplementation(kotlin("test"))
 }
 
-tasks.test {
-    systemProperty("rialto.spec", rootDir.resolve("../rialto-spec").absolutePath)
-    inputs.dir(rootDir.resolve("../rialto-spec/examples")).withPropertyName("specExamples")
-}
-
 kover {
     reports {
         // Every line and branch is tested: a gap fails `check`.

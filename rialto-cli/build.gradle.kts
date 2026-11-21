@@ -4,6 +4,8 @@ plugins {
     id("dev.buijs.conventions.formatting")
     id("dev.buijs.conventions.coverage")
     application
+    // The test contracts of the specification.
+    id("rialto-spec")
 }
 
 description = "Rialto command line"
@@ -18,8 +20,6 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
-    systemProperty("rialto.spec", rootDir.resolve("../rialto-spec").absolutePath)
-    inputs.dir(rootDir.resolve("../rialto-spec/examples")).withPropertyName("specExamples")
 }
 
 application {

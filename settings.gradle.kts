@@ -1,4 +1,6 @@
 pluginManagement {
+    includeBuild("build-logic")
+
     repositories {
         mavenLocal()
         maven("https://repo.repsy.io/mvn/buijs-dev/maven")

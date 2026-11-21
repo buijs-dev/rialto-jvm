@@ -1,8 +1,11 @@
 name: CI
 
-# Builds and tests every module with the style check, then runs the conformance runner of the specification over its
-# test contracts with the installed command line. The tests read ../rialto-spec: the checkout of rialto-spec at the
-# branch with the same name as this one when it exists (a slice changes both), else develop.
+# Builds and tests every module with the style check, then runs the conformance runner (rialto conformance) over the
+# test contracts of the specification, with the installed command line as the tool under test. The test contracts come
+# from ../rialto-spec: the checkout of rialto-spec at the branch with the same name as this one when it exists (a slice
+# changes both), else develop.
+# The tests read the published artifact dev.buijs.rialto:rialto-spec at rialtoSpecVersion, or that checkout when it is
+# of a branch with the same name (-Prialto.spec), as the artifact does not have the changes of the slice yet.
 # The convention plugins (dev.buijs.conventions.settings, dev.buijs.kotlin-style) come from the snapshots on Repsy.
 on:
   push:
@@ -32,8 +35,10 @@ jobs:
         run: |
           if git ls-remote --exit-code --heads https://github.com/buijs-dev/rialto-spec.git "refs/heads/$BRANCH" > /dev/null; then
             echo "ref=$BRANCH" >> "$GITHUB_OUTPUT"
+            echo "gradle-args=-Prialto.spec=$GITHUB_WORKSPACE/rialto-spec" >> "$GITHUB_OUTPUT"
           else
             echo "ref=develop" >> "$GITHUB_OUTPUT"
+            echo "gradle-args=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout rialto-spec (${{ steps.spec.outputs.ref }})
@@ -50,8 +55,10 @@ jobs:
 
       - name: Build and test
         working-directory: rialto-jvm
-        run: ./gradlew check kotlinStyleCheck :rialto-cli:installDist --stacktrace
+        run: ./gradlew check kotlinStyleCheck :rialto-cli:installDist ${{ steps.spec.outputs.gradle-args }} --stacktrace
 
       - name: Conformance
-        working-directory: rialto-spec
-        run: python3 tools/conformance.py --jobs 8 -v -- "$GITHUB_WORKSPACE/rialto-jvm/rialto-cli/build/install/rialto/bin/rialto" validate {contract}
+        env:
+          RIALTO: ${{ github.workspace }}/rialto-jvm/rialto-cli/build/install/rialto/bin/rialto
+        run: |
+          "$RIALTO" conformance --spec "$GITHUB_WORKSPACE/rialto-spec" --jobs 8 --verbose -- "$RIALTO" validate {contract}
