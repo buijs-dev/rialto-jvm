@@ -18,13 +18,16 @@ The first release, slice 0: the whole Rialto contract format 1.0.0, without the 
 
 **Validation** (`rialto-core`)
 
-- `ContractValidator.validate(file)` checks a contract and returns a `ValidationResult`: the typed `Contract` model and
-  every finding. It never throws for an invalid contract. Use `valid` before you read the model.
+- `ContractValidator.validate(file)` checks a contract and returns an `Outcome`: `Ok` with the valid contract (the
+  typed `Contract` model, its document and its loaded sources) and any warnings, or `Nok` with every finding. It never
+  throws for an invalid contract, and the model is only reachable through `Ok`.
+- Every function that can find mistakes returns an `Outcome` the same way: `ContractFiles.read` and `bundle`,
+  `RemoteSources.update`.
 - The checks, in order: the format version, the JSON Schema of the specification, the sources, then every reference
   (types, shapes, operations, events, views, and into sources), unique names and valid type expressions.
 - Each finding is a `Diagnostic` with a standard code (`RIALTO-K…`, `RIALTO-S…`), the requirement it enforces, a
-  message, an optional hint and a location: file, line, column and JSON Pointer. The codes are the specification's and
-  are the same in rialto-dart. See [docs/diagnostics.md](docs/diagnostics.md).
+  message, an optional hint and a location: file, line, column and JSON Pointer. The codes are the specification's. See
+  [docs/diagnostics.md](docs/diagnostics.md).
 
 **Contracts over several files**
 
@@ -40,8 +43,8 @@ The first release, slice 0: the whole Rialto contract format 1.0.0, without the 
 - Remote sources over `https`, pinned by SHA-256 in `rialto.lock` next to the contract and cached in
   `~/.cache/rialto` (or `RIALTO_CACHE`). A changed upstream document fails until `RemoteSources.update` (or
   `rialto sources update`) accepts it. `RemoteMode.OFFLINE` reads only the cache.
-- `rialto.lock` and the cache are shared with rialto-dart. Both change the lock under the same file lock and replace it
-  atomically. A lock that cannot be read is an error (`RIALTO-K010`), never an empty lock.
+- Runs that work on the same contract change `rialto.lock` under a file lock and replace it atomically. A lock that
+  cannot be read is an error (`RIALTO-K010`), never an empty lock.
 
 **Model**
 
@@ -53,7 +56,14 @@ The first release, slice 0: the whole Rialto contract format 1.0.0, without the 
 - `rialto validate [--format json] [--offline] <contract>...`: text, or one JSON document for editors and CI.
 - `rialto bundle --output <file> <contract>`.
 - `rialto sources update <contract>`.
-- Exit codes: `0` valid, `1` errors, `64` wrong usage.
+- `rialto conformance --spec <dir> [--jobs <n>] [--verbose] -- <command>...`: runs a command once per test contract of
+  the specification and reports which it passes. The command can be this command line or the tool of someone else.
+- Exit codes: `0` success, `1` errors or a file that cannot be written, `64` wrong usage, `70` when rialto itself
+  fails.
+
+**Conformance** (`rialto-core`)
+
+- `Conformance.run(spec, command)` is the conformance runner as a library: one `ConformanceResult` per test contract.
 
 **Gradle plugin** (`dev.buijs.rialto`)
 

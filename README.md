@@ -78,11 +78,12 @@ storage:
 | Local sources | Check references into OpenAPI, AsyncAPI and SQL, including migrations | (every command) | (every task) |
 | Remote sources | Build on external API, pinned to the reviewed version | `rialto sources update` | `rialtoSourcesUpdate` |
 | Machine-readable findings | Editors and CI annotate the exact place of each finding | `validate --format json` | |
+| Conformance | Prove that a tool, this one or your own, judges the test contracts of the specification as it must | `rialto conformance` | |
 
 ### Validation
 
-`rialto validate <contract>...` checks each contract and exits with `0` when all are valid, `1` when one has errors
-and `64` on wrong usage. It checks, in this order:
+`rialto validate <contract>...` checks each contract and exits with `0` when all are valid, `1` when one has errors,
+`64` on wrong usage and `70` when rialto itself fails. It checks, in this order:
 
 1. the format version (`rialto: "1.0.0"`);
 2. the JSON Schema of the contract format;
@@ -112,8 +113,8 @@ $ rialto validate --format json unknown-type.yaml
 ```
 
 Every code (`K` for the format, `S` for sources, `P` for profile rules) is listed in
-[docs/diagnostics.md](docs/diagnostics.md). The codes are shared with rialto-dart, so the same contract gives the same
-findings in every language.
+[docs/diagnostics.md](docs/diagnostics.md). The codes are those of the specification, so CI and editors can match on
+them.
 
 ### Contracts over several files
 
@@ -156,8 +157,8 @@ rialto sources update shipments.rialto.yaml
 # 1 remote source(s) updated in rialto.lock
 ```
 
-`--offline` (Gradle: `--offline`) reads only the cache. The JVM and the Dart tooling share the cache and change
-`rialto.lock` under a shared file lock, replacing it atomically. A lock that cannot be read is an error (`RIALTO-K010`);
+`--offline` (Gradle: `--offline`) reads only the cache. Runs that work on the same contract, such as Gradle and the
+command line, share the cache and change `rialto.lock` under a file lock, replacing it atomically. A lock that cannot be read is an error (`RIALTO-K010`);
 it is never treated as an empty lock.
 
 ### Gradle plugin
@@ -185,16 +186,48 @@ The Gradle plugin adds tasks for managing the contract:
 The tasks track every input (contract, fragments, local sources, migrations and `rialto.lock`), so they are up to
 date, or come from the build cache, until one of those changes.
 
+### Conformance
+
+The specification comes with test contracts: small contracts that are valid, or invalid with the codes they must be
+rejected with (`# expect: RIALTO-…` in their first lines). `rialto conformance` runs a command once per test contract
+and reports which it passes:
+
+```sh
+rialto conformance --spec ../rialto-spec --jobs 8 -- rialto validate {contract}
+```
+
+```text
+PASS valid/minimal.yaml
+PASS invalid/unknown-type.yaml
+FAIL invalid/map-key.yaml: missing RIALTO-K006
+
+21 passed, 1 failed; command: rialto validate {contract}
+```
+
+- `--spec <dir>` is a checkout of rialto-spec or its unpacked artifact: the directory that holds `examples/contracts`.
+- The command after `--` is the tool under test, in any language. `{contract}` is the path of the test contract;
+  without it the path comes last. The command runs in the directory of the test contract.
+- A valid test contract passes when the command exits with `0`. An invalid one passes when the command exits with
+  another status and its output names every expected code.
+- `--jobs <n>` runs `<n>` test contracts at a time; `--verbose` prints the output of each failing run.
+- The exit code is `0` when every test contract passes, and `1` otherwise.
+
 ### Library
 
 ```kotlin
-val result = ContractValidator.validate(Path.of("shipments.rialto.yaml"))
-if (result.valid) {
-    val contract: Contract = result.contract!!     // the typed model of the whole document
-} else {
-    result.diagnostics.forEach(::println)
+when (val outcome = ContractValidator.validate(Path.of("shipments.rialto.yaml"))) {
+    is Outcome.Ok -> {
+        val contract: Contract = outcome.value.contract     // the typed model of the whole document
+    }
+    is Outcome.Nok -> {
+        outcome.diagnostics.forEach(::println)
+    }
 }
 ```
+
+Every function that can find mistakes returns an `Outcome`: `Ok` with the value and any warnings, or `Nok` with the
+findings, of which at least one is an error. The value is only reachable through `Ok`, so a caller cannot go on with
+the result of a step that failed.
 
 ## Architecture
 
@@ -211,36 +244,39 @@ one pipeline in `ContractValidator.validate`. Each step starts only when the ste
 file ──► ContractFiles.read ──► version ──► ContractSchema ──► model (Contract)
             (bundles include)                                       │
                                                                     ▼
-          ValidationResult ◄── ContractChecks (FormatChecks, …) ◄── Sources.load
-          (contract + diagnostics)                                   (local, remote, SQL)
+   Outcome<ValidContract> ◄── ContractChecks (FormatChecks, …) ◄── Sources.load
+   (Ok: contract, Nok: findings)                                     (local, remote, SQL)
 ```
 
 | Class | Responsibility |
 |---|---|
-| `ContractValidator` | Entry point: runs the pipeline, returns `ValidationResult` |
+| `ContractValidator` | Entry point: runs the pipeline, returns `Outcome<ValidContract>` |
 | `ContractFiles` | Reads a root with its fragments as one document; bundling; build inputs |
 | `ContractSchema` | The JSON Schema of the format (equal byte for byte to the specification's) |
 | `LocatedDocument` | A YAML/JSON tree that remembers file, line and column per JSON Pointer |
-| `Contract` (`Model.kt`) | The typed model, one to one with the document |
+| `Contract` (`*Model.kt`) | The typed model, one to one with the document, in one file per section |
 | `Sources`, `SqlSchema` | Loading sources and resolving `<source>#<location>` references |
 | `RemoteSources`, `RialtoLock`, `RialtoCache` | Fetching, pinning and caching remote sources |
 | `ContractChecks`, `FormatChecks` | Rule sets over the model; each profile adds one |
-| `Diagnostics`, `Code` | Findings and the shared table of codes |
-| `ContractWriter`, `ContractMapper` | Writing the model back to YAML; the Jackson configuration shared with rialto-dart |
+| `Outcome`, `Diagnostic`, `Code` | What a step returns (`Ok` or `Nok`), a finding, and the shared table of codes |
+| `ContractWriter`, `ContractMapper` | Writing the model back to YAML; the one Jackson configuration of every reader and writer |
 
 ## Development
 
-The tests read the test contracts and the JSON Schema from a checkout of
-[rialto-spec](https://github.com/buijs-dev/rialto-spec) next to this repository (`../rialto-spec`).
+The tests of `rialto-core` and `rialto-cli` read the test contracts, the JSON Schema and `contract.md` of
+[rialto-spec](https://github.com/buijs-dev/rialto-spec) from its published artifact `dev.buijs.rialto:rialto-spec`, at
+`rialtoSpecVersion` in `gradle.properties` (see the `rialto-spec` plugin in `build-logic`). For a slice that changes the
+specification too, test against a checkout: `./gradlew check -Prialto.spec=../rialto-spec`. The tests of the Gradle
+plugin have their own contracts in `src/test/resources`; they test the tasks, not the rules.
 
 ```sh
 ./gradlew check kotlinStyleCheck        # tests, 100% coverage gate, style
 ./gradlew kotlinStyleApply              # fix style
 ./gradlew :rialto-cli:installDist       # build the rialto command
 
-# the specification's conformance suite, run against the installed command
-python3 ../rialto-spec/tools/conformance.py --jobs 8 -- \
-  "$PWD/rialto-cli/build/install/rialto/bin/rialto" validate {contract}
+# the specification's conformance suite, run against the installed command (needs a checkout of rialto-spec)
+rialto="$PWD/rialto-cli/build/install/rialto/bin/rialto"
+"$rialto" conformance --spec ../rialto-spec --jobs 8 -- "$rialto" validate {contract}
 ```
 
 - **Tests:** JUnit 6 and AssertJ; MockK only where a JDK call has to fail.
@@ -260,14 +296,13 @@ python3 ../rialto-spec/tools/conformance.py --jobs 8 -- \
 - **Report, never throw.** Every problem with a contract becomes a `Diagnostic` with a standard code and a location.
   New codes come from the specification first.
 - **Keep the CLI and the plugin thin.** Behavior belongs in `rialto-core`, so both front ends stay in step.
-- **Stay in step with rialto-dart.** YAML parsing, `rialto.lock` bytes, the cache layout and the file lock are shared.
-  Do not change them on one side only.
 - **Definition of done:** `./gradlew check kotlinStyleCheck` is green (tests, 100% coverage, style), the conformance
   suite passes, and public classes have KDoc that explains their purpose.
 
 ## Roadmap
 
-Rialto reaches 1.0.0 in slices. Each slice adds one part of the specification to every repository (spec, JVM, Dart).
+Rialto reaches 1.0.0 in slices. Each slice adds one part of the specification to the specification itself, to this
+tooling and to the generators.
 
 | Slice | Scope | Adds to this repository | Status |
 |---|---|---|---|

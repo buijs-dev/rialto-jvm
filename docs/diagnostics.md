@@ -87,8 +87,8 @@ The shared test contracts in `rialto-spec/examples/contracts` name the code each
 ## JSON output
 
 `rialto validate --format json <contract>...` prints one JSON document on stdout instead of text, with the exit
-code unchanged (0 valid, 1 errors, 64 wrong usage). It follows the informative form of the specification
-(contract.md, standard diagnostic codes); rialto-dart prints the same document.
+code unchanged (0 valid, 1 errors, 64 wrong usage, 70 when rialto itself fails). It follows the informative form of the specification
+(contract.md, standard diagnostic codes).
 
 ```json
 {
