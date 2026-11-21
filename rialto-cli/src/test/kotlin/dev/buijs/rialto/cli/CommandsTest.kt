@@ -13,8 +13,17 @@
 
 package dev.buijs.rialto.cli
 
+import dev.buijs.rialto.contract.Code
 import dev.buijs.rialto.contract.ContractMapper
+import dev.buijs.rialto.contract.ContractValidator
+import dev.buijs.rialto.contract.Diagnostic
+import dev.buijs.rialto.contract.Location
 import dev.buijs.rialto.contract.RemoteSources
+import dev.buijs.rialto.contract.RialtoCache
+import dev.buijs.rialto.contract.Severity
+import io.mockk.every
+import io.mockk.mockkObject
+import io.mockk.unmockkObject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -71,6 +80,44 @@ class CommandsTest {
     }
 
     @Test
+    fun `bundle to a file that cannot be written says so and exits with 1`(
+        @TempDir
+        work: Path,
+    ) {
+        // The directory of the output is a file.
+        val blocker = work.resolve("blocker")
+        blocker.writeText("")
+        val output = blocker.resolve("bundled.rialto.yaml")
+        val root = contracts.resolve("valid/minimal.yaml").toString()
+
+        val (code, out, err) = run("bundle", "--output", output.toString(), root)
+
+        assertThat(code).isEqualTo(1)
+        assertThat(out).isEmpty()
+        assertThat(err).startsWith("error: cannot write $output: ")
+        assertThat(err.lines().filter { it.isNotEmpty() }).hasSize(1)
+    }
+
+    @Test
+    fun `an unexpected failure of the tool is reported as a bug and exits with 70`() {
+        mockkObject(ContractValidator)
+        try {
+            every { ContractValidator.validate(any(), any()) } throws IllegalStateException("boom")
+            val contract = contracts.resolve("valid/minimal.yaml").toString()
+
+            val (code, out, err) = run("validate", contract)
+
+            assertThat(code).isEqualTo(70)
+            assertThat(out).isEmpty()
+            assertThat(err)
+                .startsWith("error: rialto failed unexpectedly. This is a bug in rialto;")
+                .contains("java.lang.IllegalStateException: boom")
+        } finally {
+            unmockkObject(ContractValidator)
+        }
+    }
+
+    @Test
     fun `sources update without remote sources writes no lock`() {
         val contract = contracts.resolve("valid/minimal.yaml")
         val (code, out, _) = run("sources", "update", contract.toString())
@@ -124,6 +171,9 @@ class CommandsTest {
             arrayOf("validate"),
             arrayOf("validate", "--format"),
             arrayOf("validate", "--format", "json"),
+            // --offline belongs to validate, after the command.
+            arrayOf("--offline", "validate", "contract.rialto.yaml"),
+            arrayOf("sources", "update", "--offline", "contract.rialto.yaml"),
             arrayOf("bundle", "contract.rialto.yaml"),
             arrayOf("bundle", "contract.rialto.yaml", "--output"),
             arrayOf("bundle", "--output", "out.yaml"),
@@ -188,7 +238,7 @@ class CommandsTest {
 
         val (code, out, _) = run("sources", "update", contract.toString())
         assertThat(code).isZero()
-        assertThat(out).contains("$url: new -> ${RemoteSources.sha256(api.toByteArray())}")
+        assertThat(out).contains("$url: new -> ${RialtoCache.sha256(api.toByteArray())}")
         assertThat(out).contains("1 remote source(s) updated in rialto.lock")
         assertThat(work.resolve("rialto.lock").readText()).contains(url)
 
@@ -218,5 +268,23 @@ class CommandsTest {
         val (update, _, err) = run("sources", "update", contract)
         assertThat(update).isEqualTo(1)
         assertThat(err).contains("error[RIALTO-K010]")
+    }
+
+    @Test
+    fun `errors are printed to stderr and warnings to stdout`() {
+        val out = ByteArrayOutputStream()
+        val err = ByteArrayOutputStream()
+        val at = Location(Path.of("a.yaml"))
+        printDiagnostics(
+            listOf(
+                Diagnostic(Severity.ERROR, Code.SCHEMA, "wrong", at),
+                Diagnostic(Severity.WARNING, Code.SCHEMA, "careful", at),
+            ),
+            PrintStream(out),
+            PrintStream(err),
+        )
+
+        assertThat(err.toString()).isEqualTo("error[RIALTO-K002] a.yaml: wrong (K1.7)\n")
+        assertThat(out.toString()).isEqualTo("warning[RIALTO-K002] a.yaml: careful (K1.7)\n")
     }
 }
