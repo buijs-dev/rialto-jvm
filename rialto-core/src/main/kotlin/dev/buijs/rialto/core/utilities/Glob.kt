@@ -10,7 +10,7 @@
  * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
  * specific language governing permissions and limitations under the License.
  */
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.utilities
 
 import java.nio.file.Files
 import java.nio.file.Path
@@ -21,32 +21,6 @@ import kotlin.io.path.isRegularFile
  * text within one path segment, `**` for any number of segments.
  */
 internal object Glob {
-    /**
-     * A path pattern of `include`: `*` within one segment, `**` any number of segments, also none. A final `**`
-     * matches every file below its directory.
-     */
-    fun regex(pattern: String): Regex {
-        val segments = pattern.split('/')
-        val regex =
-            segments.withIndex().joinToString("") { (index, segment) ->
-                val last = index == segments.lastIndex
-                when {
-                    segment == "**" && last -> {
-                        "(?:[^/]+/)*[^/]+"
-                    }
-                    segment == "**" -> {
-                        "(?:[^/]+/)*"
-                    }
-                    else -> {
-                        segment.split('*').joinToString("[^/]*") { Regex.escape(it) } +
-                            if (last) "" else "/"
-                    }
-                }
-            }
-
-        return Regex(regex)
-    }
-
     /**
      * The files [pattern] (see [regex]) matches, relative to [base]: for `include` and for an SQL source over
      * migrations. The walk starts at the directory before the first segment with `*`, so it only reads the
@@ -68,4 +42,24 @@ internal object Glob {
             files.filter { it.isRegularFile() && regex.matches(relativePath(base, it)) }.toList()
         }
     }
+
+    /**
+     * A path pattern of `include`: `*` within one segment, `**` any number of segments, also none. A final `**`
+     * matches every file below its directory.
+     */
+    fun regex(pattern: String): Regex {
+        val segments = pattern.split('/')
+        val regex =
+            segments.withIndex().joinToString("") { (index, segment) ->
+                val last = index == segments.lastIndex
+                when (segment) {
+                    "**" if last -> "(?:[^/]+/)*[^/]+"
+                    "**" -> "(?:[^/]+/)*"
+                    else -> segment.split('*').joinToString("[^/]*") { Regex.escape(it) } + if (last) "" else "/"
+                }
+            }
+
+        return Regex(regex)
+    }
+
 }
