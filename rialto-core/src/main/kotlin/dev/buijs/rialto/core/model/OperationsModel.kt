@@ -11,13 +11,14 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.model
 
 import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.annotation.JsonValue
+import dev.buijs.rialto.core.document.ContractMapper
 import tools.jackson.databind.JsonNode
 import tools.jackson.module.kotlin.convertValue
 
@@ -113,7 +114,7 @@ data class Operation(
     @get:JsonProperty(Keys.TRANSITION)
     val transitionRef: TransitionRef? = null,
 
-    /** For a delete: the states in which the entity may be deleted (L5.9). */
+    /** For a 'delete': the states in which the entity may be deleted (L5.9). */
     val from: List<String> = emptyList(),
     /** The one link this operation adds or removes (L6). */
     val link: LinkOperation? = null,
@@ -160,14 +161,18 @@ data class Subject(
 ) {
     /** Whether the identity comes from the verified principal (`by: actor`, R1.8). */
     @get:JsonIgnore
-    val actor: Boolean get() = by == ACTOR
+    val actor: Boolean
+        get() = by == Values.ACTOR
 
     @JsonValue
-    fun json(): Any = if (by == null) type else mapOf(Keys.TYPE to type, Keys.BY to by)
+    fun json(): Any =
+        if (by == null) {
+            type
+        } else {
+            mapOf(Keys.TYPE to type, Keys.BY to by)
+        }
 
     companion object {
-        const val ACTOR: String = "actor"
-
         @JvmStatic
         @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun of(node: JsonNode): Subject =
@@ -175,8 +180,8 @@ data class Subject(
                 Subject(node.asString())
             } else {
                 Subject(
-                    node.path(Keys.TYPE).asString(),
-                    node.path(Keys.BY).takeIf { it.isString }?.asString(),
+                    type = node.path(Keys.TYPE).asString(),
+                    by = node.path(Keys.BY).takeIf { it.isString }?.asString(),
                 )
             }
     }
@@ -184,10 +189,10 @@ data class Subject(
 
 /** Which soft-deleted rows a read returns (P6.3). */
 enum class DeletedRows {
-    @JsonProperty("include")
+    @JsonProperty(Values.INCLUDE)
     INCLUDE,
 
-    @JsonProperty("only")
+    @JsonProperty(Values.ONLY)
     ONLY,
 }
 
@@ -198,18 +203,20 @@ data class LinkOperation(
 ) {
     /** The owner entity of the reference. */
     @get:JsonIgnore
-    val owner: String get() = to.substringBefore('.')
+    val owner: String
+        get() = to.substringBefore('.')
 
     /** The to-many reference property of the owner. */
     @get:JsonIgnore
-    val property: String get() = to.substringAfter('.')
+    val property: String
+        get() = to.substringAfter('.')
 }
 
 enum class LinkAction {
-    @JsonProperty("add")
+    @JsonProperty(Values.ADD)
     ADD,
 
-    @JsonProperty("remove")
+    @JsonProperty(Values.REMOVE)
     REMOVE,
 }
 
@@ -258,7 +265,7 @@ data class FilterSpec(
 )
 
 /**
- * The sort of a list (Q1.3, Q3.1): the client's sort in [encoding] with a [default], or a [fixed]
+ * The 'sort' of a list (Q1.3, Q3.1): the client's sort in [encoding] with a [default], or a [fixed]
  * order the client cannot change; the [tiebreaker] follows either.
  */
 data class SortSpec(
@@ -275,7 +282,7 @@ data class Tiebreaker(
 ) {
     /** [direction], or `asc` when it is absent (Q1.3). */
     @get:JsonIgnore
-    val effectiveDirection: String get() = direction ?: ASC
+    val effectiveDirection: String get() = direction ?: Values.ASC
 
     /** As written: the field name alone, or `{field, direction}`. */
     @JsonValue
@@ -287,8 +294,6 @@ data class Tiebreaker(
         }
 
     companion object {
-        const val ASC: String = "asc"
-
         @JvmStatic
         @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun of(node: JsonNode): Tiebreaker =
@@ -296,8 +301,8 @@ data class Tiebreaker(
                 Tiebreaker(node.asString())
             } else {
                 Tiebreaker(
-                    node.path(Keys.FIELD).asString(),
-                    node.path(Keys.DIRECTION).takeIf { it.isString }?.asString(),
+                    field = node.path(Keys.FIELD).asString(),
+                    direction = node.path(Keys.DIRECTION).takeIf { it.isString }?.asString(),
                 )
             }
     }

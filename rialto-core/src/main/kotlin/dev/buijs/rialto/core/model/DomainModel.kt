@@ -11,33 +11,34 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.model
 
 import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.annotation.JsonValue
+import dev.buijs.rialto.core.document.ContractMapper
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.node.ObjectNode
 import tools.jackson.module.kotlin.treeToValue
 
 enum class Relation {
-    @JsonProperty("owned")
+    @JsonProperty(Values.OWNED)
     OWNED,
 
-    @JsonProperty("reference")
+    @JsonProperty(Values.REFERENCE)
     REFERENCE,
 }
 
 enum class DefaultPhase {
-    @JsonProperty("decode")
+    @JsonProperty(Values.DECODE)
     DECODE,
 
-    @JsonProperty("business")
+    @JsonProperty(Values.BUSINESS)
     BUSINESS,
 
-    @JsonProperty("storage")
+    @JsonProperty(Values.STORAGE)
     STORAGE,
 }
 
@@ -119,12 +120,7 @@ data class TransitionRule(
 
     /** Events published when this rule commits, whichever operation performs it (L5.10). */
     val emits: List<String> = emptyList(),
-) {
-    companion object {
-        const val NOW: String = "now"
-        const val ACTOR: String = "actor"
-    }
-}
+)
 
 /**
  * The `transition` of an operation (L5): one [rule], written `<Type>.<rule>`, or the rule per value
@@ -137,11 +133,13 @@ data class TransitionRef(
 ) {
     /** Every `<Type>.<rule>` the operation can perform. */
     @get:JsonIgnore
-    val performed: List<String> get() = listOfNotNull(rule) + rules.values.distinct()
+    val performed: List<String>
+        get() = listOfNotNull(rule) + rules.values.distinct()
 
     /** The entity of the first rule it performs. */
     @get:JsonIgnore
-    val entity: String? get() = performed.firstOrNull()?.substringBefore('.')
+    val entity: String?
+        get() = performed.firstOrNull()?.substringBefore('.')
 
     @JsonValue
     fun json(): Any = rule ?: mapOf(Keys.SELECT to select, Keys.RULES to rules)
@@ -159,7 +157,6 @@ data class TransitionRef(
                         node
                             .path(Keys.RULES)
                             .properties()
-                            .asSequence()
                             .associate { (value, rule) -> value to rule.asString() },
                 )
             }
@@ -252,40 +249,30 @@ sealed class TypeDecl {
     }
 
     companion object {
-        // The values of `kind`, one per variant.
-        private const val ENTITY: String = "entity"
-        private const val VALUE: String = "value"
-        private const val ENUM: String = "enum"
-        private const val UNION: String = "union"
-        private const val PROJECTION: String = "projection"
-
         /** Reads a type from its node: the `kind` chooses the variant, the other keys are its fields. */
         @JvmStatic
         @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun of(node: JsonNode): TypeDecl {
             val fields = (node as ObjectNode).deepCopy()
             fields.remove(Keys.KIND)
-
             val kind = node.path(Keys.KIND).asString()
-            // A row of ifs, not `when (kind)`: over five texts the compiler jumps on their hash codes, which adds
-            // branches no test can reach.
-            if (kind == ENTITY) {
+            if (kind == Values.ENTITY) {
                 return ContractMapper.json.treeToValue<Entity>(fields)
             }
 
-            if (kind == VALUE) {
+            if (kind == Values.VALUE) {
                 return ContractMapper.json.treeToValue<Value>(fields)
             }
 
-            if (kind == ENUM) {
+            if (kind == Values.ENUM) {
                 return ContractMapper.json.treeToValue<Enum>(fields)
             }
 
-            if (kind == UNION) {
+            if (kind == Values.UNION) {
                 return ContractMapper.json.treeToValue<Union>(fields)
             }
 
-            if (kind == PROJECTION) {
+            if (kind == Values.PROJECTION) {
                 return Projection.of(fields)
             }
 
@@ -298,28 +285,28 @@ sealed class TypeDecl {
     val kind: String
         get() =
             when (this) {
-                is Entity -> ENTITY
-                is Value -> VALUE
-                is Enum -> ENUM
-                is Union -> UNION
-                is Projection -> PROJECTION
+                is Entity -> Values.ENTITY
+                is Value -> Values.VALUE
+                is Enum -> Values.ENUM
+                is Union -> Values.UNION
+                is Projection -> Values.PROJECTION
             }
 }
 
 enum class Role {
-    @JsonProperty("caller")
+    @JsonProperty(Values.CALLER)
     CALLER,
 
-    @JsonProperty("application")
+    @JsonProperty(Values.APPLICATION)
     APPLICATION,
 
-    @JsonProperty("storage")
+    @JsonProperty(Values.STORAGE)
     STORAGE,
 
-    @JsonProperty("derived")
+    @JsonProperty(Values.DERIVED)
     DERIVED,
 
-    @JsonProperty("actor")
+    @JsonProperty(Values.ACTOR)
     ACTOR,
 }
 
@@ -328,27 +315,32 @@ enum class As(
     /** As written in the contract, and in diagnostics. */
     val label: String,
 ) {
-    VALUE("value"),
-    IDENTITY("identity"),
-    COMMAND("command"),
+    VALUE(Values.VALUE),
+    IDENTITY(Values.IDENTITY),
+    COMMAND(Values.COMMAND),
 
     /** `[identity, command]`: a reference a create command links or creates (L1.7). */
     IDENTITY_OR_COMMAND("[identity, command]"),
     ;
 
     @JsonValue
-    fun json(): Any = if (this == IDENTITY_OR_COMMAND) listOf(IDENTITY.label, COMMAND.label) else label
+    fun json(): Any =
+        if (this == IDENTITY_OR_COMMAND) {
+            listOf(IDENTITY.label, COMMAND.label)
+        } else {
+            label
+        }
 
     companion object {
         @JvmStatic
         @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun of(node: JsonNode): As {
             // The schema allows only the list of both forms, in either order.
-            if (node.isArray) {
-                return IDENTITY_OR_COMMAND
+            return if (node.isArray) {
+                IDENTITY_OR_COMMAND
+            } else {
+                entries.first { it.label == node.asString() }
             }
-
-            return entries.first { it.label == node.asString() }
         }
     }
 }
@@ -384,25 +376,25 @@ data class ShapeProperty(
 )
 
 enum class Command {
-    @JsonProperty("create")
+    @JsonProperty(Values.CREATE)
     CREATE,
 
-    @JsonProperty("update")
+    @JsonProperty(Values.UPDATE)
     UPDATE,
 }
 
 enum class UpdateStrategy {
-    @JsonProperty("merge-patch")
+    @JsonProperty(Values.MERGE_PATCH)
     MERGE_PATCH,
 
-    @JsonProperty("replace")
+    @JsonProperty(Values.REPLACE)
     REPLACE,
 }
 
 /**
  * A shape under `shapes`: the form a type takes for one use, such as the input of a create command. It names
  * its [source] type and per property its [ShapeProperty.role] (who provides the value) and narrower constraints.
- * This way one entity can have a create, an update and a read form without declaring its properties again.
+ * This way one entity can have a 'create', an 'update' and a 'read' form without declaring its properties again.
  */
 data class Shape(
     val source: String,

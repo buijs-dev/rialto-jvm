@@ -11,13 +11,13 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.model
 
 /**
  * A parsed type expression of the contract format, such as `decimal(8,3)` or `list<string?>` (K2.1).
  *
  * In the document the `type` of a property is a plain string, which the JSON Schema cannot check. This class is
- * the one parser of that small language: [FormatChecks] uses it to reject invalid types and find the named types
+ * the one parser of that small language: [FormatChecks][dev.buijs.rialto.core.validation.FormatChecks] uses it to reject invalid types and find the named types
  * they refer to, and checks and generators use [Property.typeExpression] to reason about a type instead of
  * taking the string apart themselves.
  */

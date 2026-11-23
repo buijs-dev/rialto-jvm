@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.model
 
 /**
  * The keys of a contract document, as the JSON Schema of the specification names them: one constant per spelling.
@@ -22,13 +22,12 @@ package dev.buijs.rialto.contract
  * compile error: the read finds nothing and the finding lands on the wrong line. Keeping them in one place, and
  * testing each against the schema, turns that into a failing test.
  *
- * A key has one constant however often the format uses the word: [TYPE] is the type of a property, of an event
- * and of a subject. Values the contract can hold, such as `entity` or `physical`, are not keys; they live with
- * the type that reads them.
+ * A key has one constant however often the format uses the word: [TYPE] is the type of property, of an event
+ * and of a subject. Values the contract can hold, such as `entity` or `physical`, are not keys; they live in
+ * [Values].
  */
 internal object Keys {
     // Top-level sections ------------------------------------------------------------------------
-
     const val AUTH: String = "auth"
     const val EVENTS: String = "events"
     const val INCLUDE: String = "include"
@@ -46,7 +45,6 @@ internal object Keys {
     const val VIEWS: String = "views"
 
     // Keys within a section ---------------------------------------------------------------------
-
     const val ACTIONS: String = "actions"
     const val API_KEYS: String = "apiKeys"
     const val AS: String = "as"

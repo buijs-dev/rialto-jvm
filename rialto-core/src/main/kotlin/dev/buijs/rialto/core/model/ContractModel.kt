@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.model
 
 import com.fasterxml.jackson.annotation.JsonAnyGetter
 import com.fasterxml.jackson.annotation.JsonAnySetter
@@ -60,28 +60,28 @@ data class Info(
 )
 
 enum class SourceKind {
-    @JsonProperty("openapi")
+    @JsonProperty(Values.OPENAPI)
     OPENAPI,
 
-    @JsonProperty("asyncapi")
+    @JsonProperty(Values.ASYNCAPI)
     ASYNCAPI,
 
-    @JsonProperty("sql")
+    @JsonProperty(Values.SQL)
     SQL,
 }
 
 enum class SourceStatus {
-    @JsonProperty("current")
+    @JsonProperty(Values.CURRENT)
     CURRENT,
 
-    @JsonProperty("deprecated")
+    @JsonProperty(Values.DEPRECATED)
     DEPRECATED,
 }
 
 /**
  * An entry under `sources`: an OpenAPI, AsyncAPI or SQL document the contract points into, so it never repeats
  * what such a document already defines. [path] is relative to the contract, an `https` URL (K4), or for SQL a
- * glob over migrations (K1.9). [Sources] loads it. [version] and [status] apply to API sources, which a contract
+ * glob over migrations (K1.9). [Sources][dev.buijs.rialto.core.sources.Sources] loads it. [version] and [status] apply to API sources, which a contract
  * can list in several versions; [dialect] applies to SQL.
  */
 data class Source(

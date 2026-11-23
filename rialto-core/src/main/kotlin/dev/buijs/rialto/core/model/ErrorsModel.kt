@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.model
 
 /**
  * The `errors` section (errors profile, E): how errors look on the wire, how a client tells one from another

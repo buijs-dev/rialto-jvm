@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.model
 
 /**
  * An event under `events` (events profile, A): a fact the service publishes, its [data] type, and the

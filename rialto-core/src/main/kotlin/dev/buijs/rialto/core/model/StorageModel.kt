@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.model
 
 import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonIgnore
@@ -48,16 +48,20 @@ sealed class ColumnRef {
                 Plain(node.asString())
             } else if (node.path(Keys.JOIN).isArray) {
                 JoinPath(
-                    node.path(Keys.JOIN).values().map {
-                        JoinStep(it.path(Keys.COLUMN).asString(), it.path(Keys.TABLE).asString())
-                    },
-                    node.path(Keys.KEY).asString(),
+                    steps =
+                        node.path(Keys.JOIN).values().map {
+                            JoinStep(
+                                column = it.path(Keys.COLUMN).asString(),
+                                table = it.path(Keys.TABLE).asString(),
+                            )
+                        },
+                    key = node.path(Keys.KEY).asString(),
                 )
             } else {
                 Join(
-                    node.path(Keys.JOIN).asString(),
-                    node.path(Keys.TABLE).asString(),
-                    node.path(Keys.KEY).asString(),
+                    join = node.path(Keys.JOIN).asString(),
+                    table = node.path(Keys.TABLE).asString(),
+                    key = node.path(Keys.KEY).asString(),
                 )
             }
     }
@@ -90,27 +94,17 @@ sealed class DeleteMode {
     @JsonValue
     fun json(): Any =
         when (this) {
-            None -> {
-                NONE
-            }
-            Physical -> {
-                PHYSICAL
-            }
-            is Soft -> {
-                listOfNotNull(Keys.SOFT to soft, by?.let { Keys.BY to it }, Keys.RESTORE to restore).toMap()
-            }
+            None -> Values.NONE
+            Physical -> Values.PHYSICAL
+            is Soft -> listOfNotNull(Keys.SOFT to soft, by?.let { Keys.BY to it }, Keys.RESTORE to restore).toMap()
         }
 
     companion object {
-        // The two modes written as a word; soft deletion is written as a mapping.
-        private const val NONE: String = "none"
-        private const val PHYSICAL: String = "physical"
-
         @JvmStatic
         @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun of(node: JsonNode): DeleteMode =
             when {
-                node.isString && node.asString() == PHYSICAL -> {
+                node.isString && node.asString() == Values.PHYSICAL -> {
                     Physical
                 }
                 node.isString -> {
@@ -172,12 +166,7 @@ data class Link(
 data class ScopeEntry(
     val column: String,
     val source: String,
-) {
-    companion object {
-        const val TENANT: String = "tenant"
-        const val ACTOR: String = "actor"
-    }
-}
+)
 
 data class Retry(
     val attempts: Int,

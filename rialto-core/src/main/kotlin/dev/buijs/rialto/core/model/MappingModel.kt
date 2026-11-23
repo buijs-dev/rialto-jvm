@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.model
 
 import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonIgnore
@@ -27,16 +27,16 @@ data class Converter(
 )
 
 /** The source of a mapped property: a path, or a path per form of `[identity, command]` (L1.7). */
-sealed class PropertyFrom {
+sealed interface PropertyFrom {
     data class Path(
         @get:JsonValue
         val path: String,
-    ) : PropertyFrom()
+    ) : PropertyFrom
 
     data class Forms(
         val identity: String,
         val command: String,
-    ) : PropertyFrom()
+    ) : PropertyFrom
 
     /** Every source path: one, or that of each form. */
     @get:JsonIgnore

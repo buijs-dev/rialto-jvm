@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.model
 
 import com.fasterxml.jackson.annotation.JsonProperty
 
@@ -35,10 +35,10 @@ data class Provider(
 
 /** How a server verifies access tokens of a provider (S3.1, S6.4). */
 enum class Verification {
-    @JsonProperty("jwt")
+    @JsonProperty(Values.JWT)
     JWT,
 
-    @JsonProperty("introspection")
+    @JsonProperty(Values.INTROSPECTION)
     INTROSPECTION,
 }
 
@@ -49,10 +49,10 @@ data class ApiKey(
 )
 
 enum class Flow {
-    @JsonProperty("authorizationCode")
+    @JsonProperty(Values.AUTHORIZATION_CODE)
     AUTHORIZATION_CODE,
 
-    @JsonProperty("clientCredentials")
+    @JsonProperty(Values.CLIENT_CREDENTIALS)
     CLIENT_CREDENTIALS,
 }
 
