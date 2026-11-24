@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.diagnostics
 
 /** The value of an outcome a test expects to be [Outcome.Ok]; the test fails with the findings when it is not. */
 internal fun <T> Outcome<T>.valueOrFail(): T =

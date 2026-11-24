@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.diagnostics
 
 /**
  * What a step returns: its value when it succeeded, and every finding either way.

@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.diagnostics
 
 import java.nio.file.Path
 
@@ -25,7 +25,8 @@ enum class Severity(
 }
 
 /** Whether one of these findings is an error. */
-fun Iterable<Diagnostic>.hasErrors(): Boolean = any { it.severity == Severity.ERROR }
+fun Iterable<Diagnostic>.hasErrors(): Boolean =
+    any { it.severity == Severity.ERROR }
 
 /**
  * Where a finding was made: a file, a position in it when known, and a JSON Pointer. The position is for a person
@@ -39,7 +40,7 @@ data class Location(
 ) {
     override fun toString(): String {
         val position = if (line != null) ":$line:${column ?: 1}" else ""
-        val path = if (pointer.isNotEmpty()) " #$pointer" else ""
+        val path = if (pointer.isEmpty()) "" else " #$pointer"
         return "${file.fileName}$position$path"
     }
 }
@@ -58,25 +59,16 @@ data class Diagnostic(
     val requirementOverride: String? = null,
 ) {
     /** The requirement this finding enforces: its own, else the one of [code]. */
-    val requirement: String get() = requirementOverride ?: code.requirement
+    val requirement: String
+        get() = requirementOverride ?: code.requirement
 
     /** The code as reported. */
-    val id: String get() = code.id
+    val id: String
+        get() = code.id
 
     override fun toString(): String {
         val hintLine = hint?.let { "\n  hint: $it" } ?: ""
         return "${severity.label}[$id] $location: $message ($requirement)$hintLine"
-    }
-
-    companion object {
-        /** A finding that fails the run. */
-        fun error(
-            code: Code,
-            message: String,
-            location: Location,
-            hint: String? = null,
-            requirement: String? = null,
-        ): Diagnostic = Diagnostic(Severity.ERROR, code, message, location, hint, requirement)
     }
 }
 
@@ -106,7 +98,7 @@ internal class Diagnostics {
         hint: String? = null,
         requirement: String? = null,
     ) {
-        items += Diagnostic.error(code, message, location, hint, requirement)
+        items += Diagnostic(Severity.ERROR, code, message, location, hint, requirement)
     }
 
     fun warning(

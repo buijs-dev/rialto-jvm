@@ -11,7 +11,7 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.diagnostics
 
 /**
  * The diagnostic codes of Rialto tooling, shared by every implementation (see docs/diagnostics.md).
