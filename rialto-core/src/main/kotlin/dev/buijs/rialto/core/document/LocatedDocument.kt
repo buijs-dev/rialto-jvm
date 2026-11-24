@@ -49,7 +49,7 @@ data class Position(
  */
 class LocatedDocument internal constructor(
     val file: Path,
-    val root: JsonNode,
+    val root: ObjectNode,
     internal val positions: Map<String, Position>,
 ) {
     /**
@@ -82,7 +82,7 @@ class LocatedDocument internal constructor(
     companion object {
         private val nodes = JsonNodeFactory.instance
 
-        /** Reads [file] as JSON when it ends in `.json`, otherwise as YAML. */
+        /** Reads [file] as JSON when it ends in `.json`, otherwise as YAML, like [parse]. */
         fun read(file: Path): LocatedDocument = parse(file, file.readText())
 
         /**
@@ -91,6 +91,8 @@ class LocatedDocument internal constructor(
          *
          * The text holds one document, and a mapping holds each key once. A second document, other content after
          * the first, and a key that is used twice all throw: reading on would silently drop what the author wrote.
+         * The document is a mapping at the top, as every contract, fragment and source is: a list or a single value
+         * throws too. An empty text is an empty mapping.
          */
         fun parse(
             file: Path,
@@ -109,6 +111,17 @@ class LocatedDocument internal constructor(
 
                 val reader = TreeReader(file, parser)
                 val root = reader.readValue("")
+                require(root is ObjectNode) {
+                    val found =
+                        when {
+                            root.isArray -> "a list"
+                            root.isNull -> "null"
+                            else -> "a single value"
+                        }
+
+                    "The document is not a mapping but $found"
+                }
+
                 val after = parser.nextToken()
                 require(after == null) {
                     val location = parser.currentTokenLocation()
@@ -121,31 +134,16 @@ class LocatedDocument internal constructor(
         }
 
         /**
-         * Reads [file] like [read] and requires a mapping at the top, as every contract and fragment is: how each
-         * of them is read. A file that cannot be read or parsed, and anything other than a mapping, such as a list
-         * or a single value, is [Outcome.Nok] with one `RIALTO-K001`.
+         * Reads [file] like [read], as every contract and fragment is read. A file that cannot be read or parsed,
+         * and anything other than a mapping, such as a list or a single value, is [Outcome.Nok] with one
+         * `RIALTO-K001`.
          */
-        fun readMapping(file: Path): Outcome<LocatedDocument> {
-            val document =
-                try {
-                    read(file)
-                } catch (e: Exception) {
-                    return unreadable(file, e.message ?: "cannot be read")
-                }
-
-            return if (document.root.isObject) {
-                Outcome.Ok(document)
-            } else {
-                val found =
-                    when {
-                        document.root.isArray -> "a list"
-                        document.root.isNull -> "null"
-                        else -> "a single value"
-                    }
-
-                unreadable(file, "The document is not a mapping but $found")
+        fun readMapping(file: Path): Outcome<LocatedDocument> =
+            try {
+                Outcome.Ok(read(file))
+            } catch (e: Exception) {
+                unreadable(file, e.message ?: "cannot be read")
             }
-        }
 
         private fun unreadable(
             file: Path,

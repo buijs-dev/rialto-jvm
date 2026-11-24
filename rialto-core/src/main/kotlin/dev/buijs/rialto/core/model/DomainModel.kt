@@ -97,8 +97,8 @@ data class Property(
 ) {
     /** The parsed [type]; valid once the contract passed validation. */
     @get:JsonIgnore
-    val typeExpression: TypeExpression get() =
-        requireNotNull(TypeExpression.parse(type)) { "Invalid type '$type'" }
+    val typeExpression: TypeExpression
+        get() = requireNotNull(TypeExpression.parse(type)) { "Invalid type '$type'" }
 }
 
 /** The state property of an entity and its allowed transitions (L5). */
@@ -252,8 +252,8 @@ sealed class TypeDecl {
         /** Reads a type from its node: the `kind` chooses the variant, the other keys are its fields. */
         @JvmStatic
         @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
-        fun of(node: JsonNode): TypeDecl {
-            val fields = (node as ObjectNode).deepCopy()
+        fun of(node: ObjectNode): TypeDecl {
+            val fields = node.deepCopy()
             fields.remove(Keys.KIND)
             val kind = node.path(Keys.KIND).asString()
             if (kind == Values.ENTITY) {

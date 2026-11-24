@@ -17,6 +17,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
 import tools.jackson.core.JacksonException
 import java.nio.file.Path
@@ -66,5 +67,32 @@ class LocatedDocumentTest {
         // then
         assertThat(document.at("/big")!!.bigIntegerValue().toString()).isEqualTo("12345678901234567890")
         assertThat(document.at("/f")!!.doubleValue()).isEqualTo(1000.0)
+    }
+
+    @ParameterizedTest(name = "{0}: {1}")
+    @CsvSource(
+        delimiter = '|',
+        value = [
+            "c.yaml | '- a'           | a list",
+            "c.yaml | '~'             | null",
+            "c.yaml | 'text'          | a single value",
+            "c.json | '[1]'           | a list",
+            "c.json | 'null'          | null",
+            "c.json | '1'             | a single value",
+        ],
+    )
+    fun `a document that is no mapping throws, saying what it is instead`(
+        name: String,
+        text: String,
+        found: String,
+    ) {
+        assertThatThrownBy { LocatedDocument.parse(Path.of(name), text) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("The document is not a mapping but $found")
+    }
+
+    @Test
+    fun `an empty document is an empty mapping`() {
+        assertThat(LocatedDocument.parse(Path.of("c.yaml"), "").root.isEmpty).isTrue()
     }
 }
