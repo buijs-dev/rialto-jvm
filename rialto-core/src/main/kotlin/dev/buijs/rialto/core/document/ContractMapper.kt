@@ -11,9 +11,10 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.document
 
 import com.fasterxml.jackson.annotation.JsonInclude
+import tools.jackson.core.json.JsonFactory
 import tools.jackson.databind.DeserializationFeature
 import tools.jackson.databind.MapperFeature
 import tools.jackson.databind.ObjectMapper
@@ -27,12 +28,18 @@ import tools.jackson.dataformat.yaml.YAMLWriteFeature
 import tools.jackson.module.kotlin.kotlinModule
 
 /**
- * The Jackson mappers between documents and the [Contract] model, configured in one place.
+ * The Jackson mappers between documents and the [Contract][dev.buijs.rialto.core.model.Contract] model, configured in one place.
  *
  * Every reader and writer in this package uses these, so a contract reads the same everywhere: in the
  * validator, the bundle and `rialto.lock`.
  */
 object ContractMapper {
+    /**
+     * Plain JSON as the specification defines it: no comments, trailing commas or single quotes. Duplicate keys are
+     * caught by [LocatedDocument] itself, so the defaults need no changes.
+     */
+    val jsonFactory: JsonFactory = JsonFactory()
+
     /**
      * YAML 1.2 with its core schema: `~` and `Null` are null, `yes` is a string, `0444` is 444 and `0o14` is 12.
      * YAML 1.1 reads `yes` as true and `0444` as an octal number, which would change what an author wrote.
@@ -50,7 +57,7 @@ object ContractMapper {
     /** Reads trees into the model; unknown keys (extensions) are left out of the model. */
     val json: ObjectMapper =
         JsonMapper
-            .builder()
+            .builder(jsonFactory)
             .addModule(kotlinModule())
             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)

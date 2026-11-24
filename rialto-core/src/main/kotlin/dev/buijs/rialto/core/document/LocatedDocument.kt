@@ -11,12 +11,17 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.document
 
+import dev.buijs.rialto.core.diagnostics.Code
+import dev.buijs.rialto.core.diagnostics.Diagnostic
+import dev.buijs.rialto.core.diagnostics.Location
+import dev.buijs.rialto.core.diagnostics.Outcome
+import dev.buijs.rialto.core.diagnostics.Severity
+import dev.buijs.rialto.core.utilities.JsonPointer
 import tools.jackson.core.JsonParser
 import tools.jackson.core.JsonToken
 import tools.jackson.core.ObjectReadContext
-import tools.jackson.core.json.JsonFactory
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.node.ArrayNode
 import tools.jackson.databind.node.JsonNodeFactory
@@ -35,7 +40,7 @@ data class Position(
 /**
  * A YAML or JSON document as a tree, with the file, line and column of every element, so
  * diagnostics can point at the place a JSON Pointer refers to. For a contract over several files
- * ([ContractFiles]) [file] is the root and every position keeps the fragment it came from.
+ * ([ContractFiles][dev.buijs.rialto.core.files.ContractFiles]) [file] is the root and every position keeps the fragment it came from.
  *
  * Jackson's own trees forget where an element was read, and the JSON Schema and the checks report their
  * findings as JSON Pointers. This class keeps both together, so a finding such as `#/types/Order/properties/id`
@@ -93,16 +98,17 @@ class LocatedDocument internal constructor(
         ): LocatedDocument {
             val factory =
                 if (file.extension.equals("json", ignoreCase = true)) {
-                    JsonFactory()
+                    ContractMapper.jsonFactory
                 } else {
                     ContractMapper.yamlFactory
                 }
 
             factory.createParser(ObjectReadContext.empty(), text).use { parser ->
-                parser.nextToken() ?: return LocatedDocument(file, nodes.objectNode(), emptyMap())
+                parser.nextToken()
+                    ?: return LocatedDocument(file, nodes.objectNode(), emptyMap())
+
                 val reader = TreeReader(file, parser)
                 val root = reader.readValue("")
-
                 val after = parser.nextToken()
                 require(after == null) {
                     val location = parser.currentTokenLocation()
@@ -127,7 +133,9 @@ class LocatedDocument internal constructor(
                     return unreadable(file, e.message ?: "cannot be read")
                 }
 
-            if (!document.root.isObject) {
+            return if (document.root.isObject) {
+                Outcome.Ok(document)
+            } else {
                 val found =
                     when {
                         document.root.isArray -> "a list"
@@ -135,19 +143,14 @@ class LocatedDocument internal constructor(
                         else -> "a single value"
                     }
 
-                return unreadable(file, "The document is not a mapping but $found")
+                unreadable(file, "The document is not a mapping but $found")
             }
-
-            return Outcome.Ok(document)
         }
 
         private fun unreadable(
             file: Path,
             message: String,
-        ): Outcome.Nok = Outcome.Nok(listOf(Diagnostic.error(Code.UNREADABLE, message, Location(file))))
-
-        /** Escapes one JSON Pointer segment (RFC 6901). */
-        fun segment(name: String): String = name.replace("~", "~0").replace("/", "~1")
+        ): Outcome.Nok = Outcome.Nok(listOf(Diagnostic(Severity.ERROR, Code.UNREADABLE, message, Location(file))))
     }
 }
 
@@ -190,7 +193,7 @@ private class TreeReader(
         val node = nodes.objectNode()
         while (parser.nextToken() == JsonToken.PROPERTY_NAME) {
             val name = parser.currentName()
-            val child = "$pointer/${LocatedDocument.segment(name)}"
+            val child = "$pointer/${JsonPointer.segment(name)}"
             val position = position()
             require(!node.has(name)) {
                 "Duplicate key '$name' at line ${position.line}, column ${position.column}"

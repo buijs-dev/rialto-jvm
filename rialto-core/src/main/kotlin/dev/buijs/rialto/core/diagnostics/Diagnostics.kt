@@ -25,8 +25,7 @@ enum class Severity(
 }
 
 /** Whether one of these findings is an error. */
-fun Iterable<Diagnostic>.hasErrors(): Boolean =
-    any { it.severity == Severity.ERROR }
+fun Iterable<Diagnostic>.hasErrors(): Boolean = any { it.severity == Severity.ERROR }
 
 /**
  * Where a finding was made: a file, a position in it when known, and a JSON Pointer. The position is for a person
