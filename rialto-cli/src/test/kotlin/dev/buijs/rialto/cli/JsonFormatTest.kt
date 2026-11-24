@@ -13,7 +13,7 @@
 
 package dev.buijs.rialto.cli
 
-import dev.buijs.rialto.contract.ContractMapper
+import dev.buijs.rialto.core.document.ContractMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.io.ByteArrayOutputStream
@@ -21,7 +21,7 @@ import java.io.PrintStream
 import java.nio.file.Path
 
 class JsonFormatTest {
-    private val contracts = Path.of(System.getProperty("rialto.spec"), "examples", "contracts")
+    private val contracts = Path.of(javaClass.getResource("/rialto-spec/examples/contracts")!!.toURI())
 
     private fun run(vararg args: String): Pair<Int, String> {
         val out = ByteArrayOutputStream()
@@ -32,31 +32,29 @@ class JsonFormatTest {
 
     @Test
     fun `a valid contract is one document with valid true`() {
-        val (code, output) =
-            run(
-                "validate",
-                "--format",
-                "json",
-                contracts.resolve("valid/minimal.yaml").toString(),
-            )
+        // given
+        val contract = contracts.resolve("valid/minimal.yaml").toString()
 
+        // when
+        val (code, output) = run("validate", "--format", "json", contract)
+
+        // then
         val json = ContractMapper.json.readTree(output)
+        val diagnostics = json.path("contracts").single().path("diagnostics")
         assertThat(code).isEqualTo(0)
         assertThat(json.path("valid").asBoolean()).isTrue()
-        assertThat(
-            json
-                .path("contracts")
-                .single()
-                .path("diagnostics")
-                .isEmpty,
-        ).isTrue()
+        assertThat(diagnostics.isEmpty).isTrue()
     }
 
     @Test
     fun `an invalid contract lists its diagnostics with code, requirement and position`() {
+        // given
         val file = contracts.resolve("invalid/unknown-type.yaml")
+
+        // when
         val (code, output) = run("validate", "--format", "json", file.toString())
 
+        // then
         val diagnostic =
             ContractMapper.json
                 .readTree(output)
@@ -74,21 +72,25 @@ class JsonFormatTest {
 
     @Test
     fun `an unknown format is wrong usage`() {
-        val (code, _) =
-            run(
-                "validate",
-                "--format",
-                "xml",
-                contracts.resolve("valid/minimal.yaml").toString(),
-            )
+        // given
+        val contract = contracts.resolve("valid/minimal.yaml").toString()
 
+        // when
+        val (code, _) = run("validate", "--format", "xml", contract)
+
+        // then
         assertThat(code).isEqualTo(64)
     }
 
     @Test
     fun `a missing file is an entry with valid false and a diagnostic without code`() {
+        // given
         val valid = contracts.resolve("valid/minimal.yaml").toString()
+
+        // when
         val (code, output) = run("validate", "--format", "json", valid, "missing.rialto.yaml")
+
+        // then
         val json = ContractMapper.json.readTree(output)
         assertThat(code).isEqualTo(1)
         assertThat(json.path("valid").asBoolean()).isFalse()
@@ -103,8 +105,13 @@ class JsonFormatTest {
 
     @Test
     fun `every diagnostic has the same fields, null when unknown`() {
+        // given
         val file = contracts.resolve("invalid/not-a-mapping.yaml")
+
+        // when
         val (_, output) = run("validate", "--format", "json", file.toString())
+
+        // then
         val diagnostic = ContractMapper.json.readTree(output).at("/contracts/0/diagnostics/0")
         assertThat(diagnostic.propertyNames().asSequence().toList())
             .containsExactly(

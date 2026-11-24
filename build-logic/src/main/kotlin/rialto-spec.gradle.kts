@@ -1,10 +1,10 @@
-// The test contracts, the JSON Schema and contract.md of the specification, for the tests of this module: the
-// published artifact dev.buijs.rialto:rialto-spec at rialtoSpecVersion (gradle.properties), unpacked in
-// build/rialto-spec. The tests read the directory from the system property rialto.spec.
+// The test contracts, the JSON Schema and the Markdown of the specification, for the tests of this module: the
+// published artifact dev.buijs.rialto:rialto-spec at rialtoSpecVersion (gradle.properties), copied to
+// build/rialto-spec/rialto-spec. That directory is on the test runtime classpath, so the tests read the specification
+// as the resource /rialto-spec.
 //
 // For a slice that changes the specification too, test against a checkout instead:
 //   ./gradlew check -Prialto.spec=../rialto-spec
-
 val rialtoSpec = configurations.create("rialtoSpec") {
     isCanBeConsumed = false
     isCanBeResolved = true
@@ -16,23 +16,19 @@ dependencies {
 
 val checkout = providers.gradleProperty("rialto.spec").map { rootProject.file(it) }
 
-val unpackRialtoSpec = tasks.register<Sync>("unpackRialtoSpec") {
-    description = "Unpacks the test contracts of the specification for the tests."
-    from(rialtoSpec.elements.map { files -> files.map { zipTree(it) } })
-    into(layout.buildDirectory.dir("rialto-spec"))
+val copyRialtoSpec = tasks.register<Sync>("copyRialtoSpec") {
+    description = "Copies the specification to the test classpath, as the resource /rialto-spec."
+    if (checkout.isPresent) {
+        from(checkout)
+    } else {
+        from(zipTree(rialtoSpec.elements.map { it.single().asFile }))
+    }
+    // Generated and downloaded directories of a checkout, which are not the specification's.
+    listOf(".git", ".idea", "site", "build", ".gradle", ".dart_tool", "node_modules").forEach { exclude("**/$it/**") }
+    into(layout.buildDirectory.dir("rialto-spec/rialto-spec"))
 }
 
-// Applied before or after the Java plugin: configure the test task once it exists.
+// Applied before or after the Java plugin: add to the test classpath once it exists.
 pluginManager.withPlugin("java") {
-    tasks.named<Test>("test") {
-        val spec =
-            if (checkout.isPresent) {
-                checkout.get()
-            } else {
-                dependsOn(unpackRialtoSpec)
-                layout.buildDirectory.dir("rialto-spec").get().asFile
-            }
-        systemProperty("rialto.spec", spec.absolutePath)
-        inputs.dir(spec).withPropertyName("rialtoSpec")
-    }
+    dependencies.add("testRuntimeOnly", files(layout.buildDirectory.dir("rialto-spec")).builtBy(copyRialtoSpec))
 }

@@ -233,7 +233,7 @@ the result of a step that failed.
 
 | Module | Role |
 |---|---|
-| `rialto-core` | Everything that matters: the contract model, reading, bundling, sources, the checks and the diagnostics. Package `dev.buijs.rialto.contract`. |
+| `rialto-core` | Everything that matters: the contract model, reading, bundling, sources, the checks and the diagnostics. Packages under `dev.buijs.rialto.core`: `diagnostics`, `document`, `model`, `schema`, `files`, `sources`, `validation`, `conformance` and `utilities`. |
 | `rialto-cli` | The `rialto` command; a thin layer that parses arguments and prints results. |
 | `rialto-gradle-plugin` | Plugin `dev.buijs.rialto`; the same rialto-cli commands but as Gradle tasks, with their inputs tracked. |
 
@@ -265,9 +265,10 @@ file ──► ContractFiles.read ──► version ──► ContractSchema ─
 
 The tests of `rialto-core` and `rialto-cli` read the test contracts, the JSON Schema and `contract.md` of
 [rialto-spec](https://github.com/buijs-dev/rialto-spec) from its published artifact `dev.buijs.rialto:rialto-spec`, at
-`rialtoSpecVersion` in `gradle.properties` (see the `rialto-spec` plugin in `build-logic`). For a slice that changes the
-specification too, test against a checkout: `./gradlew check -Prialto.spec=../rialto-spec`. The tests of the Gradle
-plugin have their own contracts in `src/test/resources`; they test the tasks, not the rules.
+`rialtoSpecVersion` in `gradle.properties`, on the test classpath as the resource `/rialto-spec` (see the `rialto-spec`
+plugin in `build-logic`). For a slice that changes the specification too, test against a checkout:
+`./gradlew check -Prialto.spec=../rialto-spec`. The tests of the Gradle plugin have their own
+contracts in `src/test/resources`; they test the tasks, not the rules.
 
 ```sh
 ./gradlew check kotlinStyleCheck        # tests, 100% coverage gate, style

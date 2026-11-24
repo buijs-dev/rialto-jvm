@@ -11,15 +11,20 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.schema
 
 import com.networknt.schema.Schema
 import com.networknt.schema.SchemaRegistry
 import com.networknt.schema.SchemaRegistryConfig
 import com.networknt.schema.SpecificationVersion
 import com.networknt.schema.path.PathType
+import dev.buijs.rialto.core.diagnostics.Code
+import dev.buijs.rialto.core.diagnostics.Diagnostic
+import dev.buijs.rialto.core.diagnostics.Severity
+import dev.buijs.rialto.core.document.ContractMapper
+import dev.buijs.rialto.core.document.LocatedDocument
+import dev.buijs.rialto.core.model.Keys
 import tools.jackson.databind.JsonNode
-import tools.jackson.databind.node.ObjectNode
 
 /**
  * The JSON Schema of the contract format (K1.7), read once from the resource that must equal the
@@ -55,7 +60,7 @@ internal object ContractSchema {
     /** The schema of the root's `include` (K5.2), which the bundled form drops. */
     val include: Schema by lazy {
         val include =
-            (tree.path("properties").path(Keys.INCLUDE) as ObjectNode).deepCopy().apply {
+            tree.path("properties").path(Keys.INCLUDE).asObject().deepCopy().apply {
                 put($$"$schema", tree.path($$"$schema").asString())
             }
 
@@ -88,7 +93,8 @@ internal object ContractSchema {
 
         // With JSON Pointer locations the root is the empty pointer, so a location appends to [at] as it is.
         return findings.map { message ->
-            Diagnostic.error(
+            Diagnostic(
+                severity = Severity.ERROR,
                 code = Code.SCHEMA,
                 message = message.message,
                 location = document.locate(at + message.instanceLocation),

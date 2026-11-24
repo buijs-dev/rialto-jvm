@@ -13,7 +13,7 @@
 
 package dev.buijs.rialto.gradle
 
-import dev.buijs.rialto.contract.ContractFiles
+import dev.buijs.rialto.core.files.ContractFiles
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.file.RegularFileProperty

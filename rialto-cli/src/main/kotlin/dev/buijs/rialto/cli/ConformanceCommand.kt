@@ -13,8 +13,8 @@
 
 package dev.buijs.rialto.cli
 
-import dev.buijs.rialto.conformance.Conformance
-import dev.buijs.rialto.conformance.ConformanceResult
+import dev.buijs.rialto.core.conformance.Conformance
+import dev.buijs.rialto.core.conformance.ConformanceResult
 import java.io.PrintStream
 import java.nio.file.Path
 
@@ -37,13 +37,10 @@ internal fun conformance(
     }
 
     results.forEach { printResult(it, arguments.verbose, out) }
-
     val failed = results.count { !it.passed }
-
     val passed = results.size - failed
     out.println()
     out.println("$passed passed, $failed failed; command: ${arguments.command.joinToString(" ")}")
-
     return if (failed == 0) 0 else 1
 }
 

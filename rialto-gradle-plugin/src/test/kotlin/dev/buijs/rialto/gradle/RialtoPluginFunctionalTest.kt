@@ -52,42 +52,66 @@ class RialtoPluginFunctionalTest {
 
     @Test
     fun `validates a contract over several files, and is up to date the second time`() {
+        // given
         setup("valid/fragments/contract.rialto.yaml")
-        assertThat(runner("rialtoValidate").build().task(":rialtoValidate")?.outcome)
-            .isEqualTo(TaskOutcome.SUCCESS)
-        assertThat(runner("rialtoValidate").build().task(":rialtoValidate")?.outcome)
-            .isEqualTo(TaskOutcome.UP_TO_DATE)
+
+        // when
+        val first = runner("rialtoValidate").build().task(":rialtoValidate")?.outcome
+        val second = runner("rialtoValidate").build().task(":rialtoValidate")?.outcome
+
+        // then
+        assertThat(first).isEqualTo(TaskOutcome.SUCCESS)
+        assertThat(second).isEqualTo(TaskOutcome.UP_TO_DATE)
     }
 
     @Test
     fun `fails on an invalid contract with its diagnostic`() {
+        // given
         setup("invalid/unknown-type.yaml")
+
+        // when
         val result = runner("rialtoValidate").buildAndFail()
+
+        // then
         assertThat(result.output).contains("error[RIALTO-K004]").contains("Rialto found 1 error(s)")
     }
 
     @Test
     fun `revalidates when a fragment changes`() {
+        // given
         setup("valid/fragments/contract.rialto.yaml")
         runner("rialtoValidate").build()
         val fragment = project.resolve("contracts/valid/fragments/parts/thing.rialto.yaml")
+
+        // when
         fragment.writeText(fragment.readText().replace("uuid", "Missing"))
+
+        // then
         assertThat(runner("rialtoValidate").buildAndFail().output).contains("error[RIALTO-K004]")
     }
 
     @Test
     fun `bundles a contract over several files into one document`() {
+        // given
         setup("valid/fragments/contract.rialto.yaml")
+
+        // when
         runner("rialtoBundle").build()
+
+        // then
         val bundled = project.resolve("build/rialto/bundled.rialto.yaml").readText()
         assertThat(bundled).contains("rialto:").doesNotContain("include")
     }
 
     @Test
     fun `updates the sources of a contract without remote sources`() {
+        // given
         setup("valid/minimal.yaml")
-        assertThat(
-            runner("rialtoSourcesUpdate").build().output,
-        ).contains("0 remote source(s) updated")
+
+        // when
+        val result = runner("rialtoSourcesUpdate").build()
+
+        // then
+        assertThat(result.output).contains("0 remote source(s) updated")
     }
 }

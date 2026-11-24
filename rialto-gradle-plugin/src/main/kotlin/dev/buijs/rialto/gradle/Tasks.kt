@@ -13,15 +13,15 @@
 
 package dev.buijs.rialto.gradle
 
-import dev.buijs.rialto.contract.ContractFiles
-import dev.buijs.rialto.contract.ContractValidator
-import dev.buijs.rialto.contract.Diagnostic
-import dev.buijs.rialto.contract.Outcome
-import dev.buijs.rialto.contract.RemoteMode
-import dev.buijs.rialto.contract.RemoteSources
-import dev.buijs.rialto.contract.Severity
-import dev.buijs.rialto.contract.SourceChange
-import dev.buijs.rialto.contract.relativePath
+import dev.buijs.rialto.core.diagnostics.Diagnostic
+import dev.buijs.rialto.core.diagnostics.Outcome
+import dev.buijs.rialto.core.diagnostics.Severity
+import dev.buijs.rialto.core.files.ContractFiles
+import dev.buijs.rialto.core.sources.RemoteMode
+import dev.buijs.rialto.core.sources.RemoteSources
+import dev.buijs.rialto.core.sources.SourceChange
+import dev.buijs.rialto.core.utilities.relativePath
+import dev.buijs.rialto.core.validation.ContractValidator
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileCollection
@@ -60,7 +60,6 @@ abstract class SourcesUpdateTask : DefaultTask() {
             }
             is Outcome.Ok -> {
                 outcome.value.forEach { logger.lifecycle(it.toString()) }
-
                 logger.lifecycle(SourceChange.summary(outcome.value))
             }
         }

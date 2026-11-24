@@ -13,12 +13,11 @@
 
 package dev.buijs.rialto.gradle
 
-import dev.buijs.rialto.contract.Code
-import dev.buijs.rialto.contract.Diagnostic
-import dev.buijs.rialto.contract.Location
-import dev.buijs.rialto.contract.Outcome
-import dev.buijs.rialto.contract.Severity
-import dev.buijs.rialto.contract.relativePath
+import dev.buijs.rialto.core.diagnostics.Code
+import dev.buijs.rialto.core.diagnostics.Diagnostic
+import dev.buijs.rialto.core.diagnostics.Location
+import dev.buijs.rialto.core.diagnostics.Outcome
+import dev.buijs.rialto.core.diagnostics.Severity
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.gradle.api.GradleException
@@ -46,9 +45,8 @@ class RialtoPluginTest {
             project.pluginManager.apply(RialtoPlugin::class.java)
             if (contract != null) {
                 project.extensions
-                    .getByType(
-                        RialtoExtension::class.java,
-                    ).contract
+                    .getByType(RialtoExtension::class.java)
+                    .contract
                     .set(project.file(contract))
             }
         }
@@ -62,26 +60,28 @@ class RialtoPluginTest {
 
     @Test
     fun `registers validate, bundle and sources update in the rialto group`() {
+        // when
         val project = project("contract.rialto.yaml")
+
+        // then
         val validate = project.task<ValidateTask>("rialtoValidate")
         val bundle = project.task<BundleTask>("rialtoBundle")
         val update = project.task<SourcesUpdateTask>("rialtoSourcesUpdate")
-
-        listOf(validate, bundle, update).forEach {
-            assertThat(it.group).isEqualTo("rialto")
-            assertThat(it.description).isNotBlank()
-        }
-
+        assertThat(update.group).isEqualTo("rialto")
+        assertThat(update.description).isNotBlank()
+        assertThat(validate.group).isEqualTo("rialto")
+        assertThat(validate.description).isNotBlank()
         assertThat(validate.offline.get()).isFalse()
         assertThat(validate.mustRunAfter.getDependencies(validate)).contains(update)
-        assertThat(
-            bundle.output.get().asFile,
-        ).isEqualTo(dir.resolve("build/rialto/bundled.rialto.yaml"))
+        assertThat(bundle.group).isEqualTo("rialto")
+        assertThat(bundle.description).isNotBlank()
+        assertThat(bundle.output.get().asFile).isEqualTo(dir.resolve("build/rialto/bundled.rialto.yaml"))
         assertThat(bundle.contractLocation.get()).isEqualTo("../../contract.rialto.yaml")
     }
 
     @Test
     fun `tracks the contract, its lock, its fragments and its local sources, but no remote one`() {
+        // given
         write(
             "contract.rialto.yaml",
             "rialto: '1.0.0'\ninfo: {name: x, version: 1.0.0}\n" +
@@ -93,10 +93,11 @@ class RialtoPluginTest {
         write("parts/a.yaml", "rialto: '1.0.0'\n")
         write("db/V2__b.sql", "")
         write("db/V1__a.sql", "")
-        val inputs =
-            project(
-                "contract.rialto.yaml",
-            ).task<ValidateTask>("rialtoValidate").contractInputs.files
+
+        // when
+        val inputs = project("contract.rialto.yaml").task<ValidateTask>("rialtoValidate").contractInputs.files
+
+        // then
         assertThat(inputs.map { it.relativeTo(dir).invariantSeparatorsPath }).containsExactly(
             "contract.rialto.yaml",
             "rialto.lock",
@@ -109,27 +110,35 @@ class RialtoPluginTest {
 
     @Test
     fun `a contract that does not exist is its only input`() {
-        val inputs =
-            project(
-                "missing.rialto.yaml",
-            ).task<BundleTask>("rialtoBundle").contractInputs.files
+        // when
+        val inputs = project("missing.rialto.yaml").task<BundleTask>("rialtoBundle").contractInputs.files
+
+        // then
         assertThat(inputs).containsExactly(dir.resolve("missing.rialto.yaml"))
     }
 
     @Test
     fun `a contract that is no valid YAML is an input with its lock, and validate reports it`() {
+        // given
         write("broken.rialto.yaml", "rialto: [unclosed\n")
         val project = project("broken.rialto.yaml")
+
+        // when
         val inputs = project.task<BundleTask>("rialtoBundle").contractInputs.files
-        assertThat(
-            inputs,
-        ).containsExactly(dir.resolve("broken.rialto.yaml"), dir.resolve("rialto.lock"))
+
+        // then
+        assertThat(inputs).containsExactly(dir.resolve("broken.rialto.yaml"), dir.resolve("rialto.lock"))
+
+        // given
         val validate = project.task<ValidateTask>("rialtoValidate")
+
+        // expect
         assertThatThrownBy { validate.validate() }.isInstanceOf(GradleException::class.java)
     }
 
     @Test
     fun `validate marks a valid contract and fails on an invalid one with the count of errors`() {
+        // given
         contracts.resolve("valid/minimal.yaml").copyTo(dir.resolve("valid.yaml"))
         val valid = project("valid.yaml").task<ValidateTask>("rialtoValidate")
         // Gradle creates the output directory before the action runs.
@@ -137,11 +146,18 @@ class RialtoPluginTest {
             .get()
             .asFile
             .mkdirs()
+
+        // when
         valid.validate()
+
+        // then
         assertThat(dir.resolve("build/rialto/validate/valid").readText()).isEqualTo("ok\n")
 
+        // given
         contracts.resolve("invalid/unknown-type.yaml").copyTo(dir.resolve("invalid.yaml"))
         val invalid = project("invalid.yaml").task<ValidateTask>("rialtoValidate")
+
+        // expect
         assertThatThrownBy { invalid.validate() }
             .isInstanceOf(GradleException::class.java)
             .hasMessage("Rialto found 1 error(s); see the messages above.")
@@ -149,6 +165,7 @@ class RialtoPluginTest {
 
     @Test
     fun `validate offline reads remote sources from the cache only`() {
+        // given
         write(
             "contract.rialto.yaml",
             "rialto: '1.0.0'\ninfo: {name: x, version: 1.0.0}\nsources:\n" +
@@ -158,9 +175,9 @@ class RialtoPluginTest {
         try {
             val task = project("contract.rialto.yaml").task<ValidateTask>("rialtoValidate")
             task.offline.set(true)
-            assertThatThrownBy {
-                task.validate()
-            }.hasMessage("Rialto found 1 error(s); see the messages above.")
+
+            // expect
+            assertThatThrownBy { task.validate() }.hasMessage("Rialto found 1 error(s); see the messages above.")
             assertThat(dir.resolve("rialto.lock")).doesNotExist()
         } finally {
             System.clearProperty("rialto.cache")
@@ -169,47 +186,55 @@ class RialtoPluginTest {
 
     @Test
     fun `bundle writes the bundled form, and fails on a contract with errors`() {
+        // given
         contracts.resolve("valid/fragments").copyRecursively(dir.resolve("fragments"))
-        project("fragments/contract.rialto.yaml").task<BundleTask>("rialtoBundle").bundle()
-        assertThat(
-            dir.resolve("build/rialto/bundled.rialto.yaml").readText(),
-        ).contains("rialto:").doesNotContain("include")
 
-        write(
-            "broken.rialto.yaml",
-            "rialto: '1.0.0'\ninfo: {name: x, version: 1.0.0}\ninclude: [none/*.yaml]\n",
-        )
+        // when
+        project("fragments/contract.rialto.yaml").task<BundleTask>("rialtoBundle").bundle()
+
+        // then
+        val bundled = dir.resolve("build/rialto/bundled.rialto.yaml").readText()
+        assertThat(bundled).contains("rialto:").doesNotContain("include")
+
+        // given
+        write("broken.rialto.yaml", "rialto: '1.0.0'\ninfo: {name: x, version: 1.0.0}\ninclude: [none/*.yaml]\n")
         val broken = project("broken.rialto.yaml").task<BundleTask>("rialtoBundle")
+
+        // expect
         assertThatThrownBy { broken.bundle() }.isInstanceOf(GradleException::class.java)
     }
 
     @Test
     fun `sources update locks nothing for a contract without remote sources, and fails on one that cannot be read`() {
+        // given
         contracts.resolve("valid/minimal.yaml").copyTo(dir.resolve("minimal.yaml"))
+
+        // when
         project("minimal.yaml").task<SourcesUpdateTask>("rialtoSourcesUpdate").update()
+
+        // then
         assertThat(dir.resolve("rialto.lock")).doesNotExist()
 
+        // given
         write("list.yaml", "- a\n")
         val unreadable = project("list.yaml").task<SourcesUpdateTask>("rialtoSourcesUpdate")
+
+        // expect
         assertThatThrownBy { unreadable.update() }.isInstanceOf(GradleException::class.java)
     }
 
     @Test
-    fun `relative paths use slashes and climb out of the directory`() {
-        assertThat(relativePath(Path.of("/a/b"), Path.of("/a/b/c/d.yaml"))).isEqualTo("c/d.yaml")
-        assertThat(
-            relativePath(Path.of("/a/b/build/rialto"), Path.of("/a/b/c.yaml")),
-        ).isEqualTo("../../c.yaml")
-    }
-
-    @Test
     fun `a task logs warnings and fails only on errors, with their count`() {
+        // given
         val task = project().tasks.register("probe", org.gradle.api.DefaultTask::class.java).get()
         val at = Location(Path.of("a.yaml"))
         val warning = Diagnostic(Severity.WARNING, Code.SCHEMA, "careful", at)
         val error = Diagnostic(Severity.ERROR, Code.SCHEMA, "wrong", at)
 
+        // when
         log(task, listOf(warning, error))
+
+        // then
         assertThat(failure(Outcome.Nok(listOf(warning, error, error))))
             .isInstanceOf(GradleException::class.java)
             .hasMessage("Rialto found 2 error(s); see the messages above.")

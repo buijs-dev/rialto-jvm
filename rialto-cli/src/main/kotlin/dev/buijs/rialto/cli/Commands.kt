@@ -13,17 +13,17 @@
 
 package dev.buijs.rialto.cli
 
-import dev.buijs.rialto.conformance.Conformance
-import dev.buijs.rialto.contract.ContractFiles
-import dev.buijs.rialto.contract.ContractMapper
-import dev.buijs.rialto.contract.ContractValidator
-import dev.buijs.rialto.contract.Diagnostic
-import dev.buijs.rialto.contract.Outcome
-import dev.buijs.rialto.contract.RemoteMode
-import dev.buijs.rialto.contract.RemoteSources
-import dev.buijs.rialto.contract.Severity
-import dev.buijs.rialto.contract.SourceChange
-import dev.buijs.rialto.contract.ValidContract
+import dev.buijs.rialto.core.conformance.Conformance
+import dev.buijs.rialto.core.diagnostics.Diagnostic
+import dev.buijs.rialto.core.diagnostics.Outcome
+import dev.buijs.rialto.core.diagnostics.Severity
+import dev.buijs.rialto.core.document.ContractMapper
+import dev.buijs.rialto.core.files.ContractFiles
+import dev.buijs.rialto.core.sources.RemoteMode
+import dev.buijs.rialto.core.sources.RemoteSources
+import dev.buijs.rialto.core.sources.SourceChange
+import dev.buijs.rialto.core.validation.ContractValidator
+import dev.buijs.rialto.core.validation.ValidContract
 import tools.jackson.databind.node.ObjectNode
 import java.io.IOException
 import java.io.PrintStream

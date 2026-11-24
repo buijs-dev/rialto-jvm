@@ -13,14 +13,15 @@
 
 package dev.buijs.rialto.cli
 
-import dev.buijs.rialto.contract.Code
-import dev.buijs.rialto.contract.ContractMapper
-import dev.buijs.rialto.contract.ContractValidator
-import dev.buijs.rialto.contract.Diagnostic
-import dev.buijs.rialto.contract.Location
-import dev.buijs.rialto.contract.RemoteSources
-import dev.buijs.rialto.contract.RialtoCache
-import dev.buijs.rialto.contract.Severity
+import dev.buijs.rialto.core.diagnostics.Code
+import dev.buijs.rialto.core.diagnostics.Diagnostic
+import dev.buijs.rialto.core.diagnostics.Location
+import dev.buijs.rialto.core.diagnostics.Severity
+import dev.buijs.rialto.core.document.ContractMapper
+import dev.buijs.rialto.core.sources.RemoteSources
+import dev.buijs.rialto.core.sources.RialtoCache
+import dev.buijs.rialto.core.utilities.sha256
+import dev.buijs.rialto.core.validation.ContractValidator
 import io.mockk.every
 import io.mockk.mockkObject
 import io.mockk.unmockkObject
@@ -28,6 +29,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
 import java.net.URI
@@ -38,7 +41,7 @@ import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 class CommandsTest {
-    private val contracts = Path.of(System.getProperty("rialto.spec"), "examples", "contracts")
+    private val contracts = Path.of(javaClass.getResource("/rialto-spec/examples/contracts")!!.toURI())
 
     /** The exit code, stdout and stderr of one run. */
     private fun run(vararg args: String): Triple<Int, String, String> {
@@ -50,18 +53,23 @@ class CommandsTest {
 
     @Test
     fun `an unknown command prints the usage`() {
+        // when
         val (code, _, err) = run("generate", "contract.rialto.yaml")
+
+        // then
         assertThat(code).isEqualTo(64)
         assertThat(err).startsWith("Usage:").contains("rialto validate")
     }
 
     @Test
     fun `validate reports the codes of an invalid contract and exits with 1`() {
-        val (code, _, err) =
-            run(
-                "validate",
-                contracts.resolve("invalid/unknown-type.yaml").toString(),
-            )
+        // given
+        val contract = contracts.resolve("invalid/unknown-type.yaml").toString()
+
+        // when
+        val (code, _, err) = run("validate", contract)
+
+        // then
         assertThat(code).isEqualTo(1)
         assertThat(err).contains("error[RIALTO-K004]")
     }
@@ -71,9 +79,14 @@ class CommandsTest {
         @TempDir
         work: Path,
     ) {
+        // given
         val output = work.resolve("bundled.rialto.yaml")
         val root = contracts.resolve("valid/fragments/contract.rialto.yaml").toString()
+
+        // when
         val (code, out, _) = run("bundle", "--output", output.toString(), root)
+
+        // then
         assertThat(code).isEqualTo(0)
         assertThat(out).contains("bundled into")
         assertThat(run("validate", output.toString()).first).isEqualTo(0)
@@ -84,14 +97,16 @@ class CommandsTest {
         @TempDir
         work: Path,
     ) {
-        // The directory of the output is a file.
+        // given: the directory of the output is a file.
         val blocker = work.resolve("blocker")
         blocker.writeText("")
         val output = blocker.resolve("bundled.rialto.yaml")
         val root = contracts.resolve("valid/minimal.yaml").toString()
 
+        // when
         val (code, out, err) = run("bundle", "--output", output.toString(), root)
 
+        // then
         assertThat(code).isEqualTo(1)
         assertThat(out).isEmpty()
         assertThat(err).startsWith("error: cannot write $output: ")
@@ -102,11 +117,14 @@ class CommandsTest {
     fun `an unexpected failure of the tool is reported as a bug and exits with 70`() {
         mockkObject(ContractValidator)
         try {
+            // given
             every { ContractValidator.validate(any(), any()) } throws IllegalStateException("boom")
             val contract = contracts.resolve("valid/minimal.yaml").toString()
 
+            // when
             val (code, out, err) = run("validate", contract)
 
+            // then
             assertThat(code).isEqualTo(70)
             assertThat(out).isEmpty()
             assertThat(err)
@@ -119,8 +137,13 @@ class CommandsTest {
 
     @Test
     fun `sources update without remote sources writes no lock`() {
+        // given
         val contract = contracts.resolve("valid/minimal.yaml")
+
+        // when
         val (code, out, _) = run("sources", "update", contract.toString())
+
+        // then
         assertThat(code).isEqualTo(0)
         assertThat(out).contains("0 remote source(s) updated")
         assertThat(contract.resolveSibling("rialto.lock").exists()).isFalse()
@@ -155,38 +178,47 @@ class CommandsTest {
         @TempDir
         work: Path,
     ) {
+        // given
         val valid = contracts.resolve("valid/minimal.yaml").toString()
         val missing = work.resolve("missing.yaml").toString()
+
+        // when
         val (code, out, err) = run("validate", valid, missing)
+
+        // then
         assertThat(code).isEqualTo(1)
         assertThat(out).contains("$valid: valid")
         assertThat(err).contains("error: $missing not found")
         assertThat(run("validate", "--format", "text", valid).first).isZero()
     }
 
-    @Test
-    fun `wrong usage exits with 64`() {
-        listOf(
-            arrayOf(),
-            arrayOf("validate"),
-            arrayOf("validate", "--format"),
-            arrayOf("validate", "--format", "json"),
+    @ParameterizedTest(name = "[{0}]")
+    @ValueSource(
+        strings = [
+            "",
+            "validate",
+            "validate --format",
+            "validate --format json",
             // --offline belongs to validate, after the command.
-            arrayOf("--offline", "validate", "contract.rialto.yaml"),
-            arrayOf("sources", "update", "--offline", "contract.rialto.yaml"),
-            arrayOf("bundle", "contract.rialto.yaml"),
-            arrayOf("bundle", "contract.rialto.yaml", "--output"),
-            arrayOf("bundle", "--output", "out.yaml"),
-            arrayOf("bundle", "--output", "out.yaml", "a.yaml", "b.yaml"),
-            arrayOf("sources"),
-            arrayOf("sources", "pin", "contract.rialto.yaml"),
-            arrayOf("sources", "update"),
-        ).forEach { args ->
-            val (code, out, err) = run(*args)
-            assertThat(code).describedAs(args.joinToString(" ")).isEqualTo(64)
-            assertThat(out).isEmpty()
-            assertThat(err).startsWith("Usage:")
-        }
+            "--offline validate contract.rialto.yaml",
+            "sources update --offline contract.rialto.yaml",
+            "bundle contract.rialto.yaml",
+            "bundle contract.rialto.yaml --output",
+            "bundle --output out.yaml",
+            "bundle --output out.yaml a.yaml b.yaml",
+            "sources",
+            "sources pin contract.rialto.yaml",
+            "sources update",
+        ],
+    )
+    fun `wrong usage exits with 64`(args: String) {
+        // when
+        val (code, out, err) = run(*args.split(" ").filter(String::isNotEmpty).toTypedArray())
+
+        // then
+        assertThat(code).isEqualTo(64)
+        assertThat(out).isEmpty()
+        assertThat(err).startsWith("Usage:")
     }
 
     @Test
@@ -194,13 +226,14 @@ class CommandsTest {
         @TempDir
         work: Path,
     ) {
+        // given
         val output = work.resolve("bundled.rialto.yaml")
-        val root =
-            contracts
-                .resolve(
-                    "invalid/fragment-include-missing/contract.rialto.yaml",
-                ).toString()
+        val root = contracts.resolve("invalid/fragment-include-missing/contract.rialto.yaml").toString()
+
+        // when
         val (code, out, err) = run("bundle", "--output", output.toString(), root)
+
+        // then
         assertThat(code).isEqualTo(1)
         assertThat(out).doesNotContain("bundled into")
         assertThat(err).contains("error[RIALTO-K007]")
@@ -212,19 +245,28 @@ class CommandsTest {
         @TempDir
         work: Path,
     ) {
+        // given
         val contract = remote(work).toString()
         RemoteSources.fetch = { error("offline") }
 
+        // when
         val (code, _, err) = run("validate", "--offline", contract)
+
+        // then
         assertThat(code).isEqualTo(1)
         assertThat(err).contains("error[RIALTO-S003]").contains("cannot be fetched offline")
 
+        // given
         RemoteSources.fetch =
             { uri: URI -> if (uri.toString() == url) api.toByteArray() else error("404") }
 
+        // expect
         assertThat(run("validate", contract).first).isZero()
+
+        // given
         RemoteSources.fetch = { error("offline") }
 
+        // expect
         assertThat(run("validate", "--offline", contract).first).isZero()
     }
 
@@ -233,18 +275,26 @@ class CommandsTest {
         @TempDir
         work: Path,
     ) {
+        // given
         val contract = remote(work)
         RemoteSources.fetch = { api.toByteArray() }
 
+        // when
         val (code, out, _) = run("sources", "update", contract.toString())
+
+        // then
         assertThat(code).isZero()
-        assertThat(out).contains("$url: new -> ${RialtoCache.sha256(api.toByteArray())}")
+        assertThat(out).contains("$url: new -> ${sha256(api.toByteArray())}")
         assertThat(out).contains("1 remote source(s) updated in rialto.lock")
         assertThat(work.resolve("rialto.lock").readText()).contains(url)
 
+        // given
         RemoteSources.fetch = { error("down") }
 
+        // when
         val (failed, failedOut, err) = run("sources", "update", contract.toString())
+
+        // then
         assertThat(failed).isEqualTo(1)
         assertThat(err).contains("error[RIALTO-S003]")
         assertThat(failedOut).doesNotContain("updated in")
@@ -255,35 +305,44 @@ class CommandsTest {
         @TempDir
         work: Path,
     ) {
+        // given
         val contract = remote(work).toString()
         Files.createDirectory(work.resolve("rialto.lock"))
+
+        // when
         val (code, out, _) = run("validate", "--format", "json", contract)
+
+        // then
         assertThat(code).isEqualTo(1)
         val json = ContractMapper.json.readTree(out)
+        val codes = json.at("/contracts/0/diagnostics").values().map { it.path("code").asString() }
         assertThat(json.path("valid").asBoolean()).isFalse()
-        assertThat(
-            json.at("/contracts/0/diagnostics").values().map { it.path("code").asString() },
-        ).containsExactly("RIALTO-K010")
+        assertThat(codes).containsExactly("RIALTO-K010")
 
+        // when
         val (update, _, err) = run("sources", "update", contract)
+
+        // then
         assertThat(update).isEqualTo(1)
         assertThat(err).contains("error[RIALTO-K010]")
     }
 
     @Test
     fun `errors are printed to stderr and warnings to stdout`() {
+        // given
         val out = ByteArrayOutputStream()
         val err = ByteArrayOutputStream()
         val at = Location(Path.of("a.yaml"))
-        printDiagnostics(
+        val diagnostics =
             listOf(
                 Diagnostic(Severity.ERROR, Code.SCHEMA, "wrong", at),
                 Diagnostic(Severity.WARNING, Code.SCHEMA, "careful", at),
-            ),
-            PrintStream(out),
-            PrintStream(err),
-        )
+            )
 
+        // when
+        printDiagnostics(diagnostics, PrintStream(out), PrintStream(err))
+
+        // then
         assertThat(err.toString()).isEqualTo("error[RIALTO-K002] a.yaml: wrong (K1.7)\n")
         assertThat(out.toString()).isEqualTo("warning[RIALTO-K002] a.yaml: careful (K1.7)\n")
     }
