@@ -35,6 +35,9 @@ import tools.jackson.databind.JsonNode
  * `RIALTO-K002`, sorted by place, at the file and line the element was read from.
  */
 internal object ContractSchema {
+    /** The one version of the contract format (the `rialto` key) this tooling reads, and of this schema. */
+    const val VERSION = "1.0.0"
+
     private val tree: JsonNode by lazy {
         // Part of this library's jar; the tests check it equals the specification's.
         ContractSchema::class.java.getResourceAsStream("contract-1.0.0.schema.json")!!.use {
@@ -77,6 +80,28 @@ internal object ContractSchema {
             }
 
         registry.getSchema(fragment)
+    }
+
+    /**
+     * The format version (K1.1) and then the JSON Schema (K1.7) of a contract in its bundled form [document]: the
+     * first checks of a validation, and what the bundled form must pass before it is written (K5.6). Empty when
+     * both pass. A contract of another version is not judged by this schema, so it gets only `RIALTO-K003`.
+     */
+    fun checkContract(document: LocatedDocument): List<Diagnostic> {
+        val version = document.root.path(Keys.RIALTO).asString("")
+        if (version != VERSION) {
+            return listOf(
+                Diagnostic(
+                    severity = Severity.ERROR,
+                    code = Code.UNSUPPORTED_VERSION,
+                    message = "Contract format '$version' is not supported",
+                    location = document.locate("/${Keys.RIALTO}"),
+                    hint = "This tool reads format $VERSION",
+                ),
+            )
+        }
+
+        return check(contract, document.root, document)
     }
 
     /**

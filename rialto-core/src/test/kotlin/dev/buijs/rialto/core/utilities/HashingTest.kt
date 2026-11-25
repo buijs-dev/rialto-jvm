@@ -15,7 +15,7 @@ package dev.buijs.rialto.core.utilities
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
-/** The SHA-256 that pins remote sources in `rialto.lock` and keys the cache. */
+/** The SHA-256 that pins remote sources in the lock of a contract and keys the cache. */
 class HashingTest {
     @Test
     fun `the hash is the lower-case hex SHA-256`() {

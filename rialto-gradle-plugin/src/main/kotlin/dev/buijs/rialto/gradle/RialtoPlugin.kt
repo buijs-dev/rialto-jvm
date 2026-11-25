@@ -58,7 +58,7 @@ class RialtoPlugin : Plugin<Project> {
             task.offline.set(project.gradle.startParameter.isOffline)
             task.contract.set(extension.contract)
             task.contractInputs.from(contractInputs)
-            // It reads rialto.lock, which rialtoSourcesUpdate writes.
+            // It reads the lock of the contract, which rialtoSourcesUpdate writes.
             task.mustRunAfter(update)
         }
 

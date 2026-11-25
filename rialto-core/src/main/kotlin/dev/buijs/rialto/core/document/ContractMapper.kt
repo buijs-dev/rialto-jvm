@@ -31,7 +31,7 @@ import tools.jackson.module.kotlin.kotlinModule
  * The Jackson mappers between documents and the [Contract][dev.buijs.rialto.core.model.Contract] model, configured in one place.
  *
  * Every reader and writer in this package uses these, so a contract reads the same everywhere: in the
- * validator, the bundle and `rialto.lock`.
+ * validator, the bundle and the lock of a contract.
  */
 object ContractMapper {
     /**

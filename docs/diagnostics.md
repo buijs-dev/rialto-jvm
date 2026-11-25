@@ -17,20 +17,20 @@ error[RIALTO-K004] shipment.rialto.yaml:149:13 #/operations/approveShipment/emit
 
 | Code | Requirement | Meaning |
 |---|---|---|
-| `RIALTO-K001` | K1.7 | contract or fragment cannot be read or parsed, or is not a mapping |
+| `RIALTO-K001` | K1.7, K1.11 | contract or fragment cannot be read or parsed, is not a mapping, or uses YAML that JSON cannot express |
 | `RIALTO-K002` | K1.7 | contract is not valid against the JSON Schema, one diagnostic per violation at its pointer; also a mapping path key of more than two names, or one without `from` (M2.10), and a view `route` that is not `/` and segments of literal text or one `{parameter}` (U5.3) |
 | `RIALTO-K003` | K1.1 | unsupported contract format version |
-| `RIALTO-K004` | K1.2 | reference does not resolve |
+| `RIALTO-K004` | K1.2 | reference does not resolve, also to a source the contract does not declare |
 | `RIALTO-K005` | K1.3 | name is used twice |
 | `RIALTO-K006` | K2.1 | invalid type expression |
 | `RIALTO-K007` | K5.2 | include path matches no file |
 | `RIALTO-K008` | K5.2 | fragment declares info, sources or include |
 | `RIALTO-K009` | K5.4 | section that belongs in one file appears in two |
-| `RIALTO-K010` | K4.5 | rialto.lock cannot be read, or cannot be written when it must change |
+| `RIALTO-K010` | K4.5 | lock cannot be read, belongs to another contract, or cannot be written when it must change |
 | `RIALTO-S001` | K1.9 | referenced source cannot be read |
 | `RIALTO-S002` | K1.2 | reference into a source does not resolve |
 | `RIALTO-S003` | K4.3 | remote source can neither be fetched nor found in the cache |
-| `RIALTO-S004` | K4.2 | remote source differs from its hash in rialto.lock |
+| `RIALTO-S004` | K4.2 | remote source differs from its hash in the lock of the contract |
 | `RIALTO-S005` | K4.4 | remote source does not use https |
 | `RIALTO-P001` | D2.2 | entity identity is not one of its properties |
 | `RIALTO-P002` | D2.6 | union variants are not all entities or all value objects |

@@ -42,7 +42,7 @@ import org.gradle.work.DisableCachingByDefault
 
 /** Fetches every remote source of the contract again and locks its new hash (`rialtoSourcesUpdate`, K4.2). */
 @DisableCachingByDefault(
-    because = "It fetches remote documents and writes rialto.lock.",
+    because = "It fetches remote documents and writes the lock of the contract.",
 )
 abstract class SourcesUpdateTask : DefaultTask() {
     @get:Internal
@@ -60,7 +60,7 @@ abstract class SourcesUpdateTask : DefaultTask() {
             }
             is Outcome.Ok -> {
                 outcome.value.forEach { logger.lifecycle(it.toString()) }
-                logger.lifecycle(SourceChange.summary(outcome.value))
+                logger.lifecycle(SourceChange.summary(outcome.value, contract))
             }
         }
     }

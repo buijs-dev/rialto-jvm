@@ -97,9 +97,17 @@ class LocatedDocument internal constructor(
         fun parse(
             file: Path,
             text: String,
+        ): LocatedDocument = parse(file, text, contract = false)
+
+        /** [parse], and for a [contract] in YAML also the YAML that JSON cannot express ([JsonYaml], K1.11). */
+        private fun parse(
+            file: Path,
+            text: String,
+            contract: Boolean,
         ): LocatedDocument {
+            val json = file.extension.equals("json", ignoreCase = true)
             val factory =
-                if (file.extension.equals("json", ignoreCase = true)) {
+                if (json) {
                     ContractMapper.jsonFactory
                 } else {
                     ContractMapper.yamlFactory
@@ -129,18 +137,25 @@ class LocatedDocument internal constructor(
                         "column ${location.columnNr}"
                 }
 
+                if (contract && !json) {
+                    JsonYaml.check(text)
+                }
+
                 return LocatedDocument(file, root, reader.positions)
             }
         }
 
         /**
          * Reads [file] like [read], as every contract and fragment is read. A file that cannot be read or parsed,
-         * and anything other than a mapping, such as a list or a single value, is [Outcome.Nok] with one
-         * `RIALTO-K001`.
+         * anything other than a mapping, such as a list or a single value, and YAML that JSON cannot express
+         * (K1.11) is [Outcome.Nok] with one `RIALTO-K001`.
          */
         fun readMapping(file: Path): Outcome<LocatedDocument> =
             try {
-                Outcome.Ok(read(file))
+                Outcome.Ok(parse(file, file.readText(), contract = true))
+            } catch (e: JsonYaml.NotJson) {
+                val location = Location(file, e.line, e.column)
+                Outcome.Nok(listOf(Diagnostic(Severity.ERROR, Code.UNREADABLE, e.reason, location, null, "K1.11")))
             } catch (e: Exception) {
                 unreadable(file, e.message ?: "cannot be read")
             }

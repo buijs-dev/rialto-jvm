@@ -142,24 +142,29 @@ in version order (`V1__`, `V2__`, `V1.10__`). The schema is read from the DDL it
 
 ### Remote sources
 
-A source path may be an `https` URL. The first run fetches it and pins its SHA-256 in `rialto.lock` next to the
-contract. **Commit that file.** Later runs read the pinned copy from the cache (`~/.cache/rialto`, or `RIALTO_CACHE`).
+A source path may be an `https` URL. The first run fetches it and pins its SHA-256 in the lock of the contract:
+`shipments.rialto.lock` next to `shipments.rialto.yaml`. **Commit that file.** Later runs read the pinned copy from the cache (`~/.cache/rialto`, or `RIALTO_CACHE`).
 When the upstream document changes, the build fails until someone accepts the new version on purpose:
 
 ```shell
 rialto validate shipments.rialto.yaml
-# error[RIALTO-S004] shipments.rialto.yaml:5:11 #/sources/api/path: https://… changed since it was locked in rialto.lock (K4.2)
+# error[RIALTO-S004] shipments.rialto.yaml:5:11 #/sources/api/path: https://… changed since it was locked in shipments.rialto.lock (K4.2)
 # hint: Run `rialto sources update` (or rialtoSourcesUpdate) to accept the new version
 
 # update it
 rialto sources update shipments.rialto.yaml
 # https://…/openapi.json: 3f1a… -> 9c2e…
-# 1 remote source(s) updated in rialto.lock
+# 1 remote source(s) updated in shipments.rialto.lock
 ```
 
 `--offline` (Gradle: `--offline`) reads only the cache. Runs that work on the same contract, such as Gradle and the
-command line, share the cache and change `rialto.lock` under a file lock, replacing it atomically. A lock that cannot be read is an error (`RIALTO-K010`);
-it is never treated as an empty lock.
+command line, share the cache and change the lock under a file lock, replacing it atomically. Each contract has its
+own lock, which names it under `contract`, so contracts in one directory never touch each other's pins. A lock that
+cannot be read, or belongs to another contract, is an error (`RIALTO-K010`); it is never treated as an empty lock.
+
+More: the guide [Remote sources and the lock](https://github.com/buijs-dev/rialto-spec/blob/develop/docs/guides/remote-sources.md)
+(scenarios and edge cases) and [docs/internals/remote-sources.md](docs/internals/remote-sources.md) (how this
+implementation works).
 
 ### Gradle plugin
 Apply the plugin and point to a rialto contract file.
@@ -183,7 +188,7 @@ The Gradle plugin adds tasks for managing the contract:
 
 ```
 
-The tasks track every input (contract, fragments, local sources, migrations and `rialto.lock`), so they are up to
+The tasks track every input (contract, fragments, local sources, migrations and the lock), so they are up to
 date, or come from the build cache, until one of those changes.
 
 ### Conformance
@@ -317,4 +322,4 @@ tooling and to the generators.
 | 7 | Events | Profile checks | planned |
 | 8 | Presentation | Profile checks | planned |
 | 9 | Versions and compatibility | `diff` between contract versions | planned |
-| 10 | Ecosystem | Generator API and protocol, `generate`, generator pins in `rialto.lock`, registry, Maven resolver | planned |
+| 10 | Ecosystem | Generator API and protocol, `generate`, generator pins in the lock, registry, Maven resolver | planned |

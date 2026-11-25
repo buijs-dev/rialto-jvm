@@ -12,7 +12,12 @@
  */
 package dev.buijs.rialto.core.utilities
 
+import java.nio.file.FileSystemException
 import java.nio.file.Path
+import kotlin.io.path.isSymbolicLink
+import kotlin.io.path.readSymbolicLink
+
+private const val MAX_LINKS = 40
 
 /** The path of [file] relative to [directory], with `/` as separator, as contracts and diagnostics write paths. */
 fun relativePath(
@@ -24,3 +29,20 @@ fun relativePath(
         .normalize()
         .relativize(file.toAbsolutePath().normalize())
         .joinToString("/")
+
+/**
+ * The file this path names once its symbolic links are followed, also when the last link points to a file that
+ * does not exist yet. Unlike [Path.toRealPath], the links of its directories are kept.
+ */
+internal fun Path.followLinks(): Path {
+    var path = toAbsolutePath()
+    repeat(MAX_LINKS) {
+        if (!path.isSymbolicLink()) {
+            return path
+        }
+
+        path = path.resolveSibling(path.readSymbolicLink()).normalize()
+    }
+
+    throw FileSystemException(toString(), null, "Too many levels of symbolic links")
+}

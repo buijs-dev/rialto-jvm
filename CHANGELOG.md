@@ -24,7 +24,12 @@ The first release, slice 0: the whole Rialto contract format 1.0.0, without the 
 - Every function that can find mistakes returns an `Outcome` the same way: `ContractFiles.read` and `bundle`,
   `RemoteSources.update`.
 - The checks, in order: the format version, the JSON Schema of the specification, the sources, then every reference
-  (types, shapes, operations, events, views, and into sources), unique names and valid type expressions.
+  (types, shapes, operations, events, views, and into sources), unique names and valid type expressions, also the
+  `context` of a view slot. An invalid type is `RIALTO-K006` at the property, a `binary` in a collection
+  `RIALTO-P021`.
+- A YAML contract or fragment with a tag beyond the core schema, an anchor, an alias or a key that is not a string is
+  `RIALTO-K001` at its line (K1.11). OpenAPI and AsyncAPI sources may use all of YAML.
+- Fragments and migrations without a version are read in code point order, as the specification says.
 - Each finding is a `Diagnostic` with a standard code (`RIALTO-K…`, `RIALTO-S…`), the requirement it enforces, a
   message, an optional hint and a location: file, line, column and JSON Pointer. The codes are the specification's. See
   [docs/diagnostics.md](docs/diagnostics.md).
@@ -40,11 +45,13 @@ The first release, slice 0: the whole Rialto contract format 1.0.0, without the 
 
 - References into OpenAPI and AsyncAPI documents (by JSON Pointer) and into SQL schemas (`table` or `table.column`).
 - A SQL source can be a glob over migrations, applied in version order. No database is needed.
-- Remote sources over `https`, pinned by SHA-256 in `rialto.lock` next to the contract and cached in
+- Remote sources over `https`, pinned by SHA-256 in the lock of the contract (`shipment.rialto.lock` next to
+  `shipment.rialto.yaml`, naming the contract it belongs to) and cached in
   `~/.cache/rialto` (or `RIALTO_CACHE`). A changed upstream document fails until `RemoteSources.update` (or
   `rialto sources update`) accepts it. `RemoteMode.OFFLINE` reads only the cache.
-- Runs that work on the same contract change `rialto.lock` under a file lock and replace it atomically. A lock that
-  cannot be read is an error (`RIALTO-K010`), never an empty lock.
+- Runs that work on the same contract change its lock under a file lock and replace it atomically. Contracts in one
+  directory each have their own lock. A lock that cannot be read, or belongs to another contract, is an error
+  (`RIALTO-K010`), never an empty lock.
 
 **Model**
 
@@ -70,5 +77,5 @@ The first release, slice 0: the whole Rialto contract format 1.0.0, without the 
 - `rialto { contract.set(file("contract.rialto.yaml")) }`, with the tasks `rialtoValidate`, `rialtoBundle` (to
   `build/rialto/bundled.rialto.yaml`) and `rialtoSourcesUpdate`. Gradle's `--offline` reads remote sources from the
   cache only.
-- `rialtoValidate` and `rialtoBundle` track the contract, its fragments, local sources, migrations and `rialto.lock`.
+- `rialtoValidate` and `rialtoBundle` track the contract, its fragments, local sources, migrations and the lock.
   They are cacheable and stay up to date until one of those changes.

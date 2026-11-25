@@ -30,7 +30,9 @@ enum class Code(
     UNREADABLE(
         id = "RIALTO-K001",
         requirement = "K1.7",
-        summary = "contract or fragment cannot be read or parsed, or is not a mapping",
+        summary =
+            "contract or fragment cannot be read or parsed, is not a mapping, " +
+                "or uses YAML that JSON cannot express",
     ),
     SCHEMA(
         id = "RIALTO-K002",
@@ -45,7 +47,7 @@ enum class Code(
     UNRESOLVED_REFERENCE(
         id = "RIALTO-K004",
         requirement = "K1.2",
-        summary = "reference does not resolve",
+        summary = "reference does not resolve, also to a source the contract does not declare",
     ),
     DUPLICATE_NAME(
         id = "RIALTO-K005",
@@ -75,7 +77,7 @@ enum class Code(
     LOCK_UNUSABLE(
         id = "RIALTO-K010",
         requirement = "K4.5",
-        summary = "rialto.lock cannot be read, or cannot be written when it must change",
+        summary = "lock cannot be read, belongs to another contract, or cannot be written when it must change",
     ),
     SOURCE_UNREADABLE(
         id = "RIALTO-S001",
@@ -95,7 +97,7 @@ enum class Code(
     REMOTE_CHANGED(
         id = "RIALTO-S004",
         requirement = "K4.2",
-        summary = "remote source differs from its hash in rialto.lock",
+        summary = "remote source differs from its hash in the lock of the contract",
     ),
     REMOTE_SCHEME(
         id = "RIALTO-S005",

@@ -100,7 +100,7 @@ class RialtoPluginTest {
         // then
         assertThat(inputs.map { it.relativeTo(dir).invariantSeparatorsPath }).containsExactly(
             "contract.rialto.yaml",
-            "rialto.lock",
+            "contract.rialto.lock",
             "parts/a.yaml",
             "api.json",
             "db/V1__a.sql",
@@ -127,7 +127,7 @@ class RialtoPluginTest {
         val inputs = project.task<BundleTask>("rialtoBundle").contractInputs.files
 
         // then
-        assertThat(inputs).containsExactly(dir.resolve("broken.rialto.yaml"), dir.resolve("rialto.lock"))
+        assertThat(inputs).containsExactly(dir.resolve("broken.rialto.yaml"), dir.resolve("broken.rialto.lock"))
 
         // given
         val validate = project.task<ValidateTask>("rialtoValidate")
@@ -178,7 +178,7 @@ class RialtoPluginTest {
 
             // expect
             assertThatThrownBy { task.validate() }.hasMessage("Rialto found 1 error(s); see the messages above.")
-            assertThat(dir.resolve("rialto.lock")).doesNotExist()
+            assertThat(dir.resolve("contract.rialto.lock")).doesNotExist()
         } finally {
             System.clearProperty("rialto.cache")
         }
@@ -213,7 +213,7 @@ class RialtoPluginTest {
         project("minimal.yaml").task<SourcesUpdateTask>("rialtoSourcesUpdate").update()
 
         // then
-        assertThat(dir.resolve("rialto.lock")).doesNotExist()
+        assertThat(dir.resolve("minimal.rialto.lock")).doesNotExist()
 
         // given
         write("list.yaml", "- a\n")

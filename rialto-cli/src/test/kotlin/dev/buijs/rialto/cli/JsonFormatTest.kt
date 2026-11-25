@@ -83,7 +83,7 @@ class JsonFormatTest {
     }
 
     @Test
-    fun `a missing file is an entry with valid false and a diagnostic without code`() {
+    fun `a missing file is an entry with valid false and a diagnostic without code, with every field`() {
         // given
         val valid = contracts.resolve("valid/minimal.yaml").toString()
 
@@ -101,6 +101,20 @@ class JsonFormatTest {
         assertThat(diagnostic.path("severity").asString()).isEqualTo("error")
         assertThat(diagnostic.path("code").isNull).isTrue()
         assertThat(diagnostic.path("message").asString()).isEqualTo("missing.rialto.yaml not found")
+        assertThat(json.propertyNames().asSequence().toList()).containsExactly("valid", "contracts")
+        assertThat(diagnostic.propertyNames().asSequence().toList()).containsExactly(
+            "severity",
+            "code",
+            "requirement",
+            "file",
+            "line",
+            "column",
+            "pointer",
+            "message",
+            "hint",
+        )
+        assertThat(diagnostic.path("file").asString()).isEqualTo("missing.rialto.yaml")
+        assertThat(diagnostic.path("requirement").isNull).isTrue()
     }
 
     @Test

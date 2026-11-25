@@ -39,6 +39,8 @@ class TypeExpressionTest {
             .isEqualTo(ListOf(Scalar("string"), nullableElements = true))
         assertThat(TypeExpression.parse("map<uuid, Shipment>"))
             .isEqualTo(MapOf(Scalar("uuid"), Named("Shipment"), nullableValues = false))
+        assertThat(TypeExpression.parse("map<uuid,Shipment>"))
+            .isEqualTo(MapOf(Scalar("uuid"), Named("Shipment"), nullableValues = false))
     }
 
     @ParameterizedTest(name = "{0}")
@@ -57,6 +59,16 @@ class TypeExpressionTest {
             "map<nope, string>",
             "map<string, nope>",
             "list<nope?>",
+            // Collections do not nest (K2.1).
+            "list<list<int32>>",
+            "map<string, list<int32>>",
+            // Written as is: no space around a type or inside it, except one after the comma of a map.
+            " string",
+            "string ",
+            "list< string>",
+            "map<string ,string>",
+            "map<string,  string>",
+            "list<string??>",
         ],
     )
     fun `rejects invalid expressions`(expression: String) {
@@ -67,7 +79,7 @@ class TypeExpressionTest {
     @Test
     fun `parses sets and maps with nullable values, and names the types an expression refers to`() {
         // when
-        val map = TypeExpression.parse(" map<Status, Shipment?> ")
+        val map = TypeExpression.parse("map<Status, Shipment?>")
 
         // then
         assertThat(TypeExpression.parse("set<Tag>")).isEqualTo(SetOf(Named("Tag"), nullableElements = false))

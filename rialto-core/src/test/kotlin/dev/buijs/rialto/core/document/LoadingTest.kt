@@ -21,8 +21,8 @@ import dev.buijs.rialto.core.diagnostics.Outcome
 import dev.buijs.rialto.core.diagnostics.Severity
 import dev.buijs.rialto.core.validation.ContractValidator
 import io.mockk.every
-import io.mockk.mockkObject
-import io.mockk.unmockkObject
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -31,6 +31,7 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import java.nio.file.Path
+import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 /** Loading a document with positions, and the steps before the checks: K001, K003 and K002. */
@@ -391,18 +392,19 @@ class LoadingTest {
     @Test
     fun `a contract that cannot be read without a reason is reported as one that cannot be read`() {
         // given
-        mockkObject(LocatedDocument.Companion)
+        val file = Path.of("a.yaml")
+        mockkStatic("kotlin.io.path.PathsKt__PathReadWriteKt")
         try {
-            every { LocatedDocument.read(any<Path>()) } throws IllegalStateException()
+            every { file.readText() } throws IllegalStateException()
 
             // when
-            val outcome = LocatedDocument.readMapping(Path.of("a.yaml"))
+            val outcome = LocatedDocument.readMapping(file)
 
             // then
             assertThat(outcome).isInstanceOf(Outcome.Nok::class.java)
             assertThat(outcome.diagnostics.single().message).isEqualTo("cannot be read")
         } finally {
-            unmockkObject(LocatedDocument.Companion)
+            unmockkStatic("kotlin.io.path.PathsKt__PathReadWriteKt")
         }
     }
 

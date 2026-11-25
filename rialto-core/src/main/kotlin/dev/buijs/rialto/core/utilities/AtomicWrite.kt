@@ -27,9 +27,10 @@ import kotlin.io.path.writeBytes
 /**
  * Writes [bytes] to this file atomically: to a temporary file next to it, then renamed over it, so a reader sees
  * either the old content or the new, never a part. Where the file system has no atomic rename, a plain one is used.
+ * A symbolic link stays a link: the file it points to is replaced.
  */
 internal fun Path.writeAtomically(bytes: ByteArray) {
-    val target = toAbsolutePath()
+    val target = followLinks()
     val temporary = createTempFile(directory = target.parent, prefix = ".${target.name}", suffix = ".tmp")
     try {
         temporary.writeBytes(bytes)

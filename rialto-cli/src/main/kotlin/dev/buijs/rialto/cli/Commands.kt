@@ -180,6 +180,8 @@ private fun printJson(
     out: PrintStream,
 ) {
     val root = ContractMapper.json.createObjectNode()
+    // `valid` first, as in the specification's form, so a reader sees the outcome before the details.
+    root.put("valid", results.all { it.valid })
     val contracts = root.putArray("contracts")
     results.forEach { validated ->
         val (file, result) = validated
@@ -187,17 +189,23 @@ private fun printJson(
         entry.put("valid", validated.valid)
         val diagnostics = entry.putArray("diagnostics")
         if (result == null) {
+            // Not a finding of the contract, so no code; the other fields are null when unknown, as for any finding.
             diagnostics
                 .addObject()
                 .put("severity", Severity.ERROR.label)
                 .putNull("code")
+                .putNull("requirement")
+                .put("file", file.toString())
+                .putNull("line")
+                .putNull("column")
+                .put("pointer", "")
                 .put("message", "$file not found")
+                .putNull("hint")
         } else {
             result.diagnostics.forEach { diagnostics.add(json(it)) }
         }
     }
 
-    root.put("valid", results.all { it.valid })
     out.println(ContractMapper.json.writerWithDefaultPrettyPrinter().writeValueAsString(root))
 }
 
@@ -259,7 +267,8 @@ private fun sources(
         return usage(err)
     }
 
-    val outcome = RemoteSources.update(Path.of(args[1]))
+    val contract = Path.of(args[1])
+    val outcome = RemoteSources.update(contract)
     printDiagnostics(outcome.diagnostics, out, err)
 
     return when (outcome) {
@@ -269,7 +278,7 @@ private fun sources(
         is Outcome.Ok -> {
             outcome.value.forEach { out.println(it) }
 
-            out.println(SourceChange.summary(outcome.value))
+            out.println(SourceChange.summary(outcome.value, contract))
             0
         }
     }

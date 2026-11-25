@@ -146,7 +146,7 @@ class CommandsTest {
         // then
         assertThat(code).isEqualTo(0)
         assertThat(out).contains("0 remote source(s) updated")
-        assertThat(contract.resolveSibling("rialto.lock").exists()).isFalse()
+        assertThat(contract.resolveSibling("minimal.rialto.lock").exists()).isFalse()
     }
 
     @TempDir
@@ -285,8 +285,8 @@ class CommandsTest {
         // then
         assertThat(code).isZero()
         assertThat(out).contains("$url: new -> ${sha256(api.toByteArray())}")
-        assertThat(out).contains("1 remote source(s) updated in rialto.lock")
-        assertThat(work.resolve("rialto.lock").readText()).contains(url)
+        assertThat(out).contains("1 remote source(s) updated in contract.rialto.lock")
+        assertThat(work.resolve("contract.rialto.lock").readText()).contains(url)
 
         // given
         RemoteSources.fetch = { error("down") }
@@ -301,13 +301,13 @@ class CommandsTest {
     }
 
     @Test
-    fun `a rialto lock that is a directory fails validate and update with RIALTO-K010`(
+    fun `a lock that is a directory fails validate and update with RIALTO-K010`(
         @TempDir
         work: Path,
     ) {
         // given
         val contract = remote(work).toString()
-        Files.createDirectory(work.resolve("rialto.lock"))
+        Files.createDirectory(work.resolve("contract.rialto.lock"))
 
         // when
         val (code, out, _) = run("validate", "--format", "json", contract)

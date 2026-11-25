@@ -95,14 +95,14 @@ sealed class TypeExpression {
             )
 
         /**
-         * Parses [text], or returns null when it is not a valid type expression. Collections do not nest: the
-         * element, key and value of a collection are a scalar or a named type.
+         * Parses [text], or returns null when it is not a valid type expression (K2.1, `RIALTO-K006`). Collections
+         * do not nest: the element, key and value of a collection are a scalar or a named type. The text is taken
+         * as written: no space around it or inside, except the one space a map may have after its comma.
          */
         fun parse(text: String): TypeExpression? {
-            val trimmed = text.trim()
             val collection =
-                COLLECTION.matchEntire(trimmed)
-                    ?: return parseSingle(trimmed)
+                COLLECTION.matchEntire(text)
+                    ?: return parseSingle(text)
 
             val (kind, arguments) = collection.destructured
             return when (kind) {
@@ -135,7 +135,7 @@ sealed class TypeExpression {
             }
 
             val key =
-                parseSingle(arguments.substring(0, comma).trim())
+                parseSingle(arguments.substring(0, comma))
                     ?: return null
 
             if (key is Scalar && key.name !in MAP_KEYS) {
@@ -143,18 +143,17 @@ sealed class TypeExpression {
             }
 
             val (value, nullable) =
-                parseElement(arguments.substring(comma + 1))
+                parseElement(arguments.substring(comma + 1).removePrefix(" "))
                     ?: return null
 
             return MapOf(key, value, nullable)
         }
 
         private fun parseElement(text: String): Pair<TypeExpression, Boolean>? {
-            val trimmed = text.trim()
-            val nullable = trimmed.endsWith("?")
+            val nullable = text.endsWith("?")
 
             val single =
-                parseSingle(trimmed.removeSuffix("?"))
+                parseSingle(text.removeSuffix("?"))
                     ?: return null
 
             return single to nullable

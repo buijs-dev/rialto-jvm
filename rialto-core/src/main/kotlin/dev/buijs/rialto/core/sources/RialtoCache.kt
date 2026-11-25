@@ -26,7 +26,7 @@ import kotlin.io.path.readBytes
  *
  * It holds two things: the remote sources by content (`sha256/<hash>/<file name>`, K4), so a pinned version can
  * be read again without network; and the file locks under `locks`, through which runs that work on the same
- * contract take turns changing `rialto.lock` ([RialtoLock]).
+ * contract take turns changing its lock ([RialtoLock]).
  */
 object RialtoCache {
     /** The root of the cache. */
@@ -59,6 +59,20 @@ object RialtoCache {
             parent.createDirectories()
             writeAtomically(body)
         }
+
+    /**
+     * The file name the cache keeps the document at [url] under: the last path segment, made safe for any file
+     * system.
+     */
+    internal fun nameOf(url: String): String {
+        val segment =
+            url
+                .substringBefore('#')
+                .substringBefore('?')
+                .substringAfterLast('/')
+                .replace(Regex("[^A-Za-z0-9._-]"), "_")
+        return segment.takeUnless { it.isEmpty() || it.all { char -> char == '.' } } ?: "source"
+    }
 
     /** Where the document [name] with [hash] lives in the cache: `sha256/<hash>/<name>`. */
     private fun document(

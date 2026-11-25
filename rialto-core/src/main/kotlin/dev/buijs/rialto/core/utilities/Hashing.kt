@@ -14,6 +14,11 @@ package dev.buijs.rialto.core.utilities
 
 import java.security.MessageDigest
 
-/** The SHA-256 of [bytes] in lower-case hex: the pin in `rialto.lock` and the key of the cache. */
+private val SHA256 = Regex("[0-9a-f]{64}")
+
+/** The SHA-256 of [bytes] in lower-case hex: the pin in the lock of a contract and the key of the cache. */
 fun sha256(bytes: ByteArray): String =
     MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+/** Whether [text] is an SHA-256 as [sha256] writes it: 64 lower-case hex digits. */
+fun isSha256(text: String): Boolean = SHA256.matches(text)
