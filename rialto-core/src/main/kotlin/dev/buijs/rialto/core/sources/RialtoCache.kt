@@ -11,12 +11,11 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package dev.buijs.rialto.contract
+package dev.buijs.rialto.core.sources
 
-import java.nio.file.Files
+import dev.buijs.rialto.core.utilities.sha256
+import dev.buijs.rialto.core.utilities.writeAtomically
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
-import java.security.MessageDigest
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
 import kotlin.io.path.readBytes
@@ -32,11 +31,7 @@ import kotlin.io.path.readBytes
 object RialtoCache {
     /** The root of the cache. */
     fun dir(): Path =
-        dir(
-            System.getProperty("rialto.cache"),
-            System.getenv("RIALTO_CACHE"),
-            System.getProperty("user.home"),
-        )
+        dir(System.getProperty("rialto.cache"), System.getenv("RIALTO_CACHE"), System.getProperty("user.home"))
 
     /** The root of the cache: the system [property], else the [environment] variable, else under [home]. */
     internal fun dir(
@@ -48,35 +43,26 @@ object RialtoCache {
     /** The directory of the file locks. */
     internal fun locks(): Path = dir().resolve("locks")
 
-    /** The SHA-256 of [bytes] in lower-case hex: the pin in `rialto.lock` and the key of the cache. */
-    fun sha256(bytes: ByteArray): String =
-        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-
     /** The cached document [name] with [hash], or null when it is missing or its content no longer has [hash]. */
     internal fun cached(
         hash: String,
         name: String,
-    ): Path? {
-        val file = dir().resolve("sha256").resolve(hash).resolve(name)
-        return file.takeIf { it.exists() && sha256(it.readBytes()) == hash }
-    }
+    ): Path? = document(hash, name).takeIf { it.exists() && sha256(it.readBytes()) == hash }
 
     /** Stores [body] as the document [name] with [hash], atomically, and returns its file. */
     internal fun store(
         hash: String,
         name: String,
         body: ByteArray,
-    ): Path {
-        val directory = dir().resolve("sha256").resolve(hash).createDirectories()
-        val file = directory.resolve(name)
-        val temporary = Files.createTempFile(directory, name, ".part")
-        Files.write(temporary, body)
-        Files.move(
-            temporary,
-            file,
-            StandardCopyOption.REPLACE_EXISTING,
-            StandardCopyOption.ATOMIC_MOVE,
-        )
-        return file
-    }
+    ): Path =
+        document(hash, name).apply {
+            parent.createDirectories()
+            writeAtomically(body)
+        }
+
+    /** Where the document [name] with [hash] lives in the cache: `sha256/<hash>/<name>`. */
+    private fun document(
+        hash: String,
+        name: String,
+    ): Path = dir().resolve("sha256").resolve(hash).resolve(name)
 }
