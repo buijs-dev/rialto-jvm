@@ -1,4 +1,9 @@
 # Rialto JVM
+[![](https://img.shields.io/badge/Buijs-Software-blue)](https://buijs.dev/)
+[![GitHub](https://img.shields.io/github/license/buijs-dev/rialto-jvm?color=black)](https://github.com/buijs-dev/rialto-jvm/blob/main/LICENSE)
+[![codecov](https://codecov.io/gh/buijs-dev/rialto-jvm/branch/develop/graph/badge.svg?token=zeRQJQ2dtD)](https://codecov.io/gh/buijs-dev/rialto-jvm)
+[![CodeScene Average Code Health](https://codescene.io/projects/88437/status-badges/average-code-health)](https://codescene.io/projects/88437)
+[![CodeScene System Mastery](https://codescene.io/projects/88437/status-badges/system-mastery)](https://codescene.io/projects/88437)
 
 The JVM tooling for [Rialto](https://github.com/buijs-dev/rialto-spec): a library, a command line tool and a Gradle plugin
 that read, check and bundle Rialto contracts.
@@ -169,12 +174,12 @@ implementation works).
 ### Gradle plugin
 Apply the plugin and point to a rialto contract file.
 ```kotlin
-plugins { 
-    id("dev.buijs.rialto") version "<version>" 
+plugins {
+    id("dev.buijs.rialto") version "<version>"
 }
 
-rialto { 
-    contract.set(file("contract.rialto.yaml")) 
+rialto {
+    contract.set(file("contract.rialto.yaml"))
 }
 ```
 
