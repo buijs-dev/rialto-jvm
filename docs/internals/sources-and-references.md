@@ -16,6 +16,7 @@ of the specification; this document is about the code. Remote sources have their
 | `Sources.Resolution` | The result of `resolve`: `Resolved`, `UnknownSource`, `Unloaded` or `Missing(source)` |
 | `LoadedSource` | A source that could be read: `Document` (OpenAPI or AsyncAPI, a `LocatedDocument`) or `Sql` (tables by lower-case name) |
 | `ExternalRef` | A reference taken apart: `source` before `#`, `location` after it; for SQL `table` and `column`, in lower case |
+| `RestOperation` | A REST binding taken apart: the `source`, the `path` template and the `method` of `<source>#/paths/<path>/<method>` |
 | `SourceLoader` | Loads one source at a time and reports `RIALTO-S001`; private to `Sources.kt` |
 | `migrations(base, path)` | The files a migrations path matches, in version order |
 | `SqlSchema`, `SqlTable`, `SqlColumn` | A reader of DDL, and the tables and columns it gives |
@@ -90,10 +91,13 @@ operations of an operation, the `channel` of an event and of a stream, the `dead
 `source` and `target` of a mapping when they contain `#`, the `scheme` of `auth.scopes` and `auth.apiKeys`, and in
 `storage` the `table` and every column the entry names (`columns`, joins and their keys, `children`, `links`,
 `version`, `delete`, `storageKey`, `blobs`). A column is checked as `<table>.<column>`, with `<table>` the reference
-of the table it belongs to. `Contract.sourceReferences()` makes the `successor` of a source a `Reference.Name` of `Kind.SOURCE` (`K004`).
+of the table it belongs to. A `rest` operation is a `Reference.External` with `operation = true`: besides resolving,
+its location must be `/paths/<path>/<method>` with an HTTP method of OpenAPI (`RestOperation.of`), else it is `S002`,
+because a path item or an element inside an operation is no operation to bind to. `Contract.sourceReferences()` makes the `successor` of a source a `Reference.Name` of `Kind.SOURCE` (`K004`).
 
 `Sources.table(reference)` and `Sources.element(reference)` give the `SqlTable` or the `JsonNode` a reference points
-at, or null.
+at, or null. They, `ExternalRef` and `RestOperation` are public, so a generator that reads a `ValidContract` looks a
+reference up the way validation resolved it, without parsing it again.
 
 ## Migrations
 

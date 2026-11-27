@@ -30,6 +30,10 @@ The first release, slice 0: the whole Rialto contract format 1.0.0, without the 
 - A YAML contract or fragment with a tag beyond the core schema, an anchor, an alias or a key that is not a string is
   `RIALTO-K001` at its line (K1.11). OpenAPI and AsyncAPI sources may use all of YAML.
 - Fragments and migrations without a version are read in code point order, as the specification says.
+- A `rest` binding must name an OpenAPI operation, `<source>#/paths/<path>/<method>`: one that resolves to a path item
+  or to an element inside an operation is `RIALTO-S002`.
+- `ExternalRef`, `RestOperation`, `Sources.table` and `Sources.element` are public: a generator looks up a reference
+  of a valid contract the way validation resolved it.
 - Each finding is a `Diagnostic` with a standard code (`RIALTO-K…`, `RIALTO-S…`), the requirement it enforces, a
   message, an optional hint and a location: file, line, column and JSON Pointer. The codes are the specification's. See
   [docs/diagnostics.md](docs/diagnostics.md).

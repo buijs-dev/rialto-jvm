@@ -15,6 +15,7 @@ package dev.buijs.rialto.core.validation.format
 
 import dev.buijs.rialto.core.diagnostics.Code
 import dev.buijs.rialto.core.sources.ExternalRef
+import dev.buijs.rialto.core.sources.RestOperation
 import dev.buijs.rialto.core.sources.Sources
 import dev.buijs.rialto.core.validation.CheckContext
 
@@ -79,7 +80,8 @@ internal class ReferenceChecks(
     /** A declared source that could not be loaded was reported when loading, so it is not reported again here. */
     private fun external(reference: Reference.External) {
         val ref = ExternalRef.of(reference.reference)
-        when (val resolution = context.sources.resolve(reference.reference, contract.sources.keys)) {
+        val resolution = context.sources.resolve(reference.reference, contract.sources.keys)
+        when (resolution) {
             Sources.Resolution.UnknownSource -> {
                 context.error(
                     code = Code.UNRESOLVED_REFERENCE,
@@ -96,6 +98,24 @@ internal class ReferenceChecks(
             }
             Sources.Resolution.Resolved, Sources.Resolution.Unloaded -> {
             }
+        }
+
+        if (resolution == Sources.Resolution.Resolved) {
+            operation(reference, ref)
+        }
+    }
+
+    /** A REST binding must land on an operation, not on the path item or an element inside the operation. */
+    private fun operation(
+        reference: Reference.External,
+        ref: ExternalRef,
+    ) {
+        if (reference.operation && RestOperation.of(reference.reference) == null) {
+            context.error(
+                code = Code.SOURCE_REFERENCE,
+                message = "'${ref.location}' is not an OpenAPI operation /paths/<path>/<method>",
+                pointer = reference.pointer.text,
+            )
         }
     }
 }

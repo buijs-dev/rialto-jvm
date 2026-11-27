@@ -24,7 +24,7 @@ internal fun Contract.operationReferences(): List<Reference> =
     collectReferences {
         operations.forEach { (name, operation) ->
             val at = Pointer.of(Keys.OPERATIONS, name)
-            operation.rest?.all?.forEach { external(it, at / Keys.REST) }
+            operation.rest?.all?.forEach { restOperation(it, at / Keys.REST) }
             data(operation.input, at / Keys.INPUT)
             data(operation.outputType, at / Keys.OUTPUT)
 

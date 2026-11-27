@@ -42,6 +42,17 @@ class ServiceReferencesTest {
                     value = "api#/paths/~1nope/get",
                     at = "/operations/getShipment/rest",
                 ),
+                // A location that exists but is no OpenAPI operation: the path item, or an element inside the operation.
+                external(
+                    pointer = "/operations/getShipment/rest/api",
+                    value = "api#/paths/~1shipments",
+                    at = "/operations/getShipment/rest",
+                ),
+                external(
+                    pointer = "/operations/getShipment/rest/api",
+                    value = "api#/paths/~1shipments/get/responses",
+                    at = "/operations/getShipment/rest",
+                ),
                 ref(
                     pointer = "/operations/listShipments/rest/nope",
                     value = "nope#/paths/~1shipments/get",

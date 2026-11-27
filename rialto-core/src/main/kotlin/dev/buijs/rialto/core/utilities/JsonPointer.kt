@@ -22,4 +22,12 @@ object JsonPointer {
 
     /** A JSON Pointer from its [segments], each escaped. */
     fun of(segments: Iterable<String>): String = segments.joinToString("") { "/" + segment(it) }
+
+    /** The unescaped segments of [pointer]; none for the whole document, null when it is not a JSON Pointer. */
+    fun segments(pointer: String): List<String>? =
+        when {
+            pointer.isEmpty() -> emptyList()
+            !pointer.startsWith('/') -> null
+            else -> pointer.drop(1).split('/').map { it.replace("~1", "/").replace("~0", "~") }
+        }
 }
