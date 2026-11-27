@@ -67,4 +67,19 @@ class JsonPointerTest {
         // expect
         assertThat(JsonPointer.of("a", "")).isEqualTo("/a/")
     }
+
+    @Test
+    fun `a pointer is taken apart into its unescaped segments`() {
+        // expect
+        assertThat(JsonPointer.segments("/paths/~1a~0b/get")).containsExactly("paths", "/a~b", "get")
+        assertThat(JsonPointer.segments("/a/")).containsExactly("a", "")
+        assertThat(JsonPointer.segments("")).isEmpty()
+        assertThat(JsonPointer.segments("a/b")).isNull()
+    }
+
+    @Test
+    fun `a pointer taken apart and joined again is the same`() {
+        // expect
+        assertThat(JsonPointer.of(JsonPointer.segments("/a~1b/~0c")!!)).isEqualTo("/a~1b/~0c")
+    }
 }

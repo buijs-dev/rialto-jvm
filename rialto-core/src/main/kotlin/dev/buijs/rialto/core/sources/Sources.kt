@@ -59,7 +59,7 @@ sealed class LoadedSource {
  * A reference into a source, `<source>#<location>`, taken apart once: the name under `sources` and the place in
  * that source. For a SQL source the location is `table` or `table.column`, compared in lower case.
  */
-internal data class ExternalRef(
+data class ExternalRef(
     val source: String,
     val location: String,
 ) {
@@ -152,13 +152,13 @@ class Sources(
     }
 
     /** The SQL table `<source>#<table>` refers to, or null. */
-    internal fun table(reference: String): SqlTable? {
+    fun table(reference: String): SqlTable? {
         val ref = ExternalRef.of(reference)
         return (loaded[ref.source] as? LoadedSource.Sql)?.schema?.get(ref.table)
     }
 
     /** The element a document reference points at, or null. */
-    internal fun element(reference: String): JsonNode? {
+    fun element(reference: String): JsonNode? {
         val ref = ExternalRef.of(reference)
         return (loaded[ref.source] as? LoadedSource.Document)?.document?.at(ref.location)
     }

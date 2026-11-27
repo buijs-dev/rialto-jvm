@@ -62,6 +62,8 @@ internal sealed interface Reference {
     data class External(
         val reference: String,
         override val pointer: Pointer,
+        /** Whether it must name an OpenAPI operation, `/paths/<path>/<method>` (a REST binding). */
+        val operation: Boolean = false,
     ) : Reference
 }
 
@@ -126,6 +128,14 @@ internal class ReferenceCollector {
         if (reference != null) {
             references += Reference.External(reference, at)
         }
+    }
+
+    /** An OpenAPI operation, `<source>#/paths/<path>/<method>`. */
+    fun restOperation(
+        reference: String,
+        at: Pointer,
+    ) {
+        references += Reference.External(reference, at, operation = true)
     }
 
     /** The column [column] of [table], `<source>#<table>`, when it is set. */

@@ -234,4 +234,16 @@ class SourcesTest {
         assertThat(ExternalRef.of("db#orders").column).isNull()
         assertThat(ExternalRef.of("api#/paths/~1a").location).isEqualTo("/paths/~1a")
     }
+
+    @Test
+    fun `a REST binding names an OpenAPI operation, a path and a method`() {
+        // expect
+        assertThat(RestOperation.of("api#/paths/~1orders~1{orderId}/get"))
+            .isEqualTo(RestOperation("api", "/orders/{orderId}", "get"))
+
+        assertThat(RestOperation.of("api#paths/~1orders/get")).isNull()
+        assertThat(RestOperation.of("api#/paths/~1orders")).isNull()
+        assertThat(RestOperation.of("api#/channels/~1orders/get")).isNull()
+        assertThat(RestOperation.of("api#/paths/~1orders/parameters")).isNull()
+    }
 }
