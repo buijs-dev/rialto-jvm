@@ -1,0 +1,41 @@
+rialto: '1.0.0'
+auth:
+  providers:
+    main:
+      issuer: https://auth.example.invalid/realms/shipment
+  clients:
+    web:
+      provider: main
+      clientId: shipment-web
+      flow: authorizationCode
+      scopes:
+      - openid
+      - profile
+    warehouseSync:
+      provider: main
+      clientId: warehouse-sync
+      flow: clientCredentials
+  claims:
+    subject: sub
+    roles:
+    - realm_access.roles
+    - scope
+    tenant: tenant_id
+    service: service_account
+  scopes:
+    shipments:read:
+      description: Read shipments
+      scheme: api#/components/securitySchemes/oauth
+    shipments:write:
+      description: Edit shipments
+      scheme: api#/components/securitySchemes/oauth
+    shipments:approve:
+      description: Approve shipments
+      scheme: api#/components/securitySchemes/oauth
+  apiKeys:
+    warehouseKey:
+      scheme: api#/components/securitySchemes/warehouseKey
+      lookup: WarehouseKeys
+    warehouseKeyV1:
+      scheme: apiV1#/components/securitySchemes/warehouseKey
+      lookup: WarehouseKeys

@@ -1,0 +1,242 @@
+rialto: '1.0.0'
+mappings:
+- source: apiV1#/components/schemas/Address
+  target: Address
+  direction: both
+- source: apiV1#/components/schemas/ShipmentLine
+  target: ShipmentLine
+  direction: both
+- source: apiV1#/components/schemas/Shipment
+  target: Shipment
+  direction: both
+  properties:
+    note:
+      from: note
+    label:
+      custom: true
+    serviceCodes:
+      nullAs: empty
+      onDuplicate: keepFirst
+    createdAt:
+      converter:
+        toTarget: parseShipmentInstant
+        toSource: formatShipmentInstant
+        nulls: pass
+        scope: whole
+    priority:
+      custom: true
+    legacyReference:
+      custom: true
+  ignore:
+  - legacyReference
+  - priority
+- source: apiV1#/components/schemas/ShipmentSummary
+  target: ShipmentSummary
+  direction: toSource
+- source: apiV1#/components/schemas/CreateShipmentLine
+  target: CreateShipmentLine
+  direction: toTarget
+- source: apiV1#/components/schemas/CreateShipment
+  target: CreateShipment
+  direction: toTarget
+  ignore:
+  - priority
+  properties:
+    priority:
+      custom: true
+- source: apiV1#/components/schemas/PatchShipmentNote
+  target: PatchShipmentNote
+  direction: toTarget
+- source: apiV1#/components/schemas/Recipient
+  target: Recipient
+  direction: both
+  variants:
+    person: person
+    company: company
+- source: apiV1#/components/schemas/PersonRecipient
+  target: PersonRecipient
+  direction: both
+- source: apiV1#/components/schemas/CompanyRecipient
+  target: CompanyRecipient
+  direction: both
+- source: apiV1#/components/schemas/Carrier
+  target: Carrier
+  direction: both
+- source: apiV1#/components/schemas/ReplaceCarrier
+  target: ReplaceCarrier
+  direction: toTarget
+- source: apiV1#/components/schemas/PatchShipmentContents
+  target: PatchShipmentContents
+  direction: toTarget
+  properties:
+    lines:
+      nullAs: empty
+- source: apiV1#/components/schemas/ReconcileShipmentLine
+  target: ReconcileShipmentLine
+  direction: toTarget
+- source: apiV1#/components/schemas/CreateShipmentPackage
+  target: CreateShipmentPackage
+  direction: toTarget
+- source: apiV1#/components/schemas/ShipmentPackage
+  target: ShipmentPackage
+  direction: both
+- source: apiV1#/components/schemas/CreateCustomsDeclaration
+  target: CreateCustomsDeclaration
+  direction: toTarget
+- source: apiV1#/components/schemas/CustomsDeclaration
+  target: CustomsDeclaration
+  direction: both
+- source: apiV1#/components/schemas/Tag
+  target: Tag
+  direction: both
+- source: apiV1#/components/schemas/TrackingScan
+  target: TrackingScan
+  direction: both
+- source: apiV1#/components/schemas/HandlingUnit
+  target: HandlingUnit
+  direction: both
+- source: apiV1#/components/schemas/Pallet
+  target: Pallet
+  direction: both
+- source: apiV1#/components/schemas/Container
+  target: Container
+  direction: both
+- source: apiV1#/components/schemas/CountShipments
+  target: CountShipments
+  direction: toTarget
+- source: api#/components/schemas/Address
+  target: Address
+  direction: both
+- source: api#/components/schemas/ShipmentLine
+  target: ShipmentLine
+  direction: both
+- source: api#/components/schemas/Shipment
+  target: Shipment
+  direction: both
+  properties:
+    note:
+      from: deliveryNote
+    label:
+      custom: true
+    serviceCodes:
+      nullAs: empty
+      onDuplicate: keepFirst
+    createdAt:
+      converter:
+        toTarget: parseShipmentInstant
+        toSource: formatShipmentInstant
+        nulls: pass
+        scope: whole
+    legacyReference:
+      custom: true
+    priority:
+      converter:
+        toTarget: decodePriority
+        toSource: encodePriority
+        nulls: pass
+        scope: whole
+  ignore:
+  - legacyReference
+- source: api#/components/schemas/ShipmentSummary
+  target: ShipmentSummary
+  direction: toSource
+- source: api#/components/schemas/CreateShipmentLine
+  target: CreateShipmentLine
+  direction: toTarget
+- source: api#/components/schemas/CreateShipment
+  target: CreateShipment
+  direction: toTarget
+  properties:
+    priority:
+      converter:
+        toTarget: decodePriority
+        toSource: encodePriority
+        nulls: pass
+        scope: whole
+- source: api#/components/schemas/PatchShipmentNote
+  target: PatchShipmentNote
+  direction: toTarget
+- source: api#/components/schemas/Recipient
+  target: Recipient
+  direction: both
+  variants:
+    person: person
+    company: company
+- source: api#/components/schemas/PersonRecipient
+  target: PersonRecipient
+  direction: both
+- source: api#/components/schemas/CompanyRecipient
+  target: CompanyRecipient
+  direction: both
+- source: api#/components/schemas/Carrier
+  target: Carrier
+  direction: both
+- source: api#/components/schemas/ReplaceCarrier
+  target: ReplaceCarrier
+  direction: toTarget
+- source: api#/components/schemas/PatchShipmentContents
+  target: PatchShipmentContents
+  direction: toTarget
+  properties:
+    lines:
+      nullAs: empty
+- source: api#/components/schemas/ReconcileShipmentLine
+  target: ReconcileShipmentLine
+  direction: toTarget
+- source: api#/components/schemas/CreateShipmentPackage
+  target: CreateShipmentPackage
+  direction: toTarget
+- source: api#/components/schemas/ShipmentPackage
+  target: ShipmentPackage
+  direction: both
+- source: api#/components/schemas/CreateCustomsDeclaration
+  target: CreateCustomsDeclaration
+  direction: toTarget
+- source: api#/components/schemas/CustomsDeclaration
+  target: CustomsDeclaration
+  direction: both
+- source: api#/components/schemas/Tag
+  target: Tag
+  direction: both
+- source: api#/components/schemas/TrackingScan
+  target: TrackingScan
+  direction: both
+- source: api#/components/schemas/HandlingUnit
+  target: HandlingUnit
+  direction: both
+- source: api#/components/schemas/Pallet
+  target: Pallet
+  direction: both
+- source: api#/components/schemas/Container
+  target: Container
+  direction: both
+- source: api#/components/schemas/DecideShipment
+  target: DecideShipment
+  direction: toTarget
+- source: api#/components/schemas/CountShipments
+  target: CountShipments
+  direction: toTarget
+- source: api#/components/schemas/Warehouse
+  target: Warehouse
+  direction: both
+- source: api#/components/schemas/WarehouseService
+  target: WarehouseService
+  direction: toTarget
+  properties:
+    priority:
+      members:
+        NORMAL: standard
+        RUSH: express
+      fallback: standard
+- source: api#/components/schemas/SavedSearch
+  target: SavedSearch
+  direction: toSource
+- source: api#/components/schemas/CreateSavedSearch
+  target: CreateSavedSearch
+  direction: toTarget
+- source: events#/components/schemas/ShipmentApprovedData
+  target: ShipmentApproved
+  direction: both
+- source: events#/components/schemas/ShipmentCancelledData
+  target: ShipmentCancelled
+  direction: both

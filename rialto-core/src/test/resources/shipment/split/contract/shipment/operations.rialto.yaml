@@ -1,0 +1,414 @@
+rialto: '1.0.0'
+operations:
+  listShipments:
+    rest:
+      apiV1: apiV1#/paths/~1shipments/get
+      api: api#/paths/~1shipments/get
+    output: ShipmentSummary
+    list:
+      fields:
+        id:
+          sort: true
+        state:
+          filter:
+          - eq
+          - ne
+          - in
+          - out
+          sort: true
+        note:
+          filter:
+          - eq
+          - ne
+          - like
+          - ilike
+        expectedDelivery:
+          filter:
+          - eq
+          - ge
+          - lt
+        createdAt:
+          filter:
+          - ge
+          - lt
+      filter:
+        encoding: rsql
+        maxLength: 1000
+        maxDepth: 4
+      sort:
+        encoding: colon
+        default:
+        - field: state
+          direction: asc
+        tiebreaker: id
+      pagination:
+        strategy: cursor
+        limit:
+          default: 20
+          max: 100
+      count:
+        strategy: operation
+        operation: countShipments
+        response: /count
+      wire:
+        parameters:
+          filter: filter
+          sort: sort
+          limit: limit
+          cursor: cursor
+        response:
+          items: /items
+          next: /nextCursor
+          previous: /prevCursor
+  countShipments:
+    rest:
+      apiV1: apiV1#/paths/~1shipments~1count/get
+      api: api#/paths/~1shipments~1count/get
+    input: CountShipments
+    parameters:
+      state: state
+  createShipment:
+    rest:
+      apiV1: apiV1#/paths/~1shipments/post
+      api: api#/paths/~1shipments/post
+    lifecycle: create
+    input: CreateShipment
+    output: Shipment
+    idempotency:
+      header: Idempotency-Key
+    principals:
+    - user
+    - service
+    errors:
+    - blank
+    - invalidRecipient
+  deleteShipment:
+    rest:
+      apiV1: apiV1#/paths/~1shipments~1{shipmentId}/delete
+      api: api#/paths/~1shipments~1{shipmentId}/delete
+    parameters:
+      shipmentId: id
+    lifecycle: delete
+    subject: Shipment
+    from:
+    - draft
+    precondition:
+      token: If-Match
+      version: stored
+    errors:
+    - invalidTransition
+  getShipment:
+    rest:
+      apiV1: apiV1#/paths/~1shipments~1{shipmentId}/get
+      api: api#/paths/~1shipments~1{shipmentId}/get
+    parameters:
+      shipmentId: id
+    output: Shipment
+    conditional:
+      token: If-None-Match
+      version: stored
+    errors:
+    - shipmentMissing
+  patchShipmentNote:
+    rest:
+      apiV1: apiV1#/paths/~1shipments~1{shipmentId}/patch
+      api: api#/paths/~1shipments~1{shipmentId}/patch
+    parameters:
+      shipmentId: id
+    lifecycle: update
+    input: PatchShipmentNote
+    output: Shipment
+    precondition:
+      token: If-Match
+      version: stored
+    handler: authored
+    deprecated:
+      since: '2026-11-05'
+      sunset: '2027-11-01'
+      successor: patchShipmentContents
+  approveShipment:
+    rest:
+      apiV1: apiV1#/paths/~1shipments~1{shipmentId}~1approval/post
+      api: api#/paths/~1shipments~1{shipmentId}~1approval/post
+    parameters:
+      shipmentId: id
+    output: Shipment
+    precondition:
+      token: If-Match
+      version: stored
+    handler: authored
+    description: Approves a draft shipment that has at least one line.
+    transition: Shipment.approve
+    errors:
+    - noLines
+    - approvalDenied
+    - invalidTransition
+    principals:
+    - user
+    policy: canApproveShipment
+  decideShipment:
+    rest: api#/paths/~1shipments~1{shipmentId}~1decision/post
+    parameters:
+      shipmentId: id
+    input: DecideShipment
+    output: Shipment
+    precondition:
+      token: If-Match
+      version: stored
+    handler: authored
+    description: Approves or rejects a draft shipment, as the decision in the body selects.
+    transition:
+      select: /decision
+      rules:
+        approve: Shipment.approve
+        reject: Shipment.reject
+    errors:
+    - noLines
+    - approvalDenied
+    - invalidTransition
+    principals:
+    - user
+    policy: canApproveShipment
+  patchShipmentContents:
+    rest: api#/paths/~1shipments~1{shipmentId}~1contents/patch
+    parameters:
+      shipmentId: id
+    lifecycle: update
+    input: PatchShipmentContents
+    output: Shipment
+    precondition:
+      token: If-Match
+      version: stored
+    idempotency:
+      header: Idempotency-Key
+    handler: authored
+  createShipments:
+    rest: api#/paths/~1shipments~1batch/post
+    lifecycle: create
+    input: CreateShipment
+    output: Shipment
+    batch:
+      atomic: false
+      maxItems: 50
+      wire:
+        items: /items
+        results: /results
+        value: /value
+        problem: /problem
+    errors:
+    - blank
+    - invalidRecipient
+    - warehouseUnavailable
+    - shipmentQuota
+    principals:
+    - service
+  replaceCarrier:
+    rest: api#/paths/~1carriers~1{carrierId}/put
+    parameters:
+      carrierId: id
+    lifecycle: update
+    input: ReplaceCarrier
+    output: Carrier
+    handler: authored
+    principals:
+    - service
+  addShipmentTag:
+    rest: api#/paths/~1shipments~1{shipmentId}~1tags~1{tagId}/put
+    parameters:
+      shipmentId: id
+      tagId: tags.id
+    link:
+      to: Shipment.tags
+      action: add
+  removeShipmentTag:
+    rest: api#/paths/~1shipments~1{shipmentId}~1tags~1{tagId}/delete
+    parameters:
+      shipmentId: id
+      tagId: tags.id
+    link:
+      to: Shipment.tags
+      action: remove
+  getCarrierByName:
+    rest: api#/paths/~1carriers~1by-name~1{name}/get
+    parameters:
+      name: name
+    output: Carrier
+  suggestCarriers:
+    rest: api#/paths/~1carriers~1suggestions/get
+    parameters:
+      q: name
+    output: list<Carrier>
+    maxItems: 10
+    handler: authored
+  deleteCarrier:
+    rest: api#/paths/~1carriers~1{carrierId}/delete
+    parameters:
+      carrierId: id
+    lifecycle: delete
+    subject: Carrier
+    principals:
+    - service
+  getCarrier:
+    rest: api#/paths/~1carriers~1{carrierId}/get
+    parameters:
+      carrierId: id
+    output: Carrier
+    deleted: include
+  restoreCarrier:
+    rest: api#/paths/~1carriers~1{carrierId}~1restoration/post
+    parameters:
+      carrierId: id
+    lifecycle: restore
+    subject: Carrier
+    output: Carrier
+    principals:
+    - service
+  cancelShipment:
+    rest: api#/paths/~1shipments~1{shipmentId}~1cancellation/post
+    parameters:
+      shipmentId: id
+    output: Shipment
+    handler: authored
+    precondition:
+      token: If-Match
+      version: stored
+    emits:
+    - ShipmentCancelled
+    errors:
+    - shipmentMissing
+  localShipmentSearch:
+    output: Shipment
+    list:
+      fields:
+        id:
+          sort: true
+        city:
+          path: destination.city
+          filter:
+          - eq
+          - like
+          - ilike
+        createdAt:
+          filter:
+          - gt
+          - ge
+          - lt
+          - le
+          sort: true
+      filter:
+        maxDepth: 3
+      sort:
+        tiebreaker: id
+      pagination:
+        strategy: cursor
+        limit:
+          default: 20
+          max: 100
+      count:
+        strategy: none
+  listCarriers:
+    rest: api#/paths/~1carriers/get
+    output: Carrier
+    list:
+      fields:
+        id:
+          sort: true
+        name:
+          sort: true
+          filter:
+          - eq
+          - like
+      filter:
+        encoding: rsql
+        maxDepth: 3
+      sort:
+        encoding: jsonapi
+        tiebreaker: id
+      pagination:
+        strategy: offset
+        limit:
+          default: 20
+          max: 100
+      count:
+        strategy: inline
+        response: /total
+      wire:
+        parameters:
+          filter: filter
+          sort: sort
+          limit: limit
+          offset: offset
+        response:
+          items: /items
+          more: /more
+  uploadDeliveryProof:
+    rest:
+      api: api#/paths/~1shipments~1{shipmentId}~1proof/put
+    parameters:
+      shipmentId: shipment
+    input: UploadDeliveryProof
+    handler: authored
+    errors:
+    - shipmentMissing
+  getDeliveryProof:
+    rest:
+      api: api#/paths/~1shipments~1{shipmentId}~1proof/get
+    parameters:
+      shipmentId: shipment
+    output: DeliveryProofFile
+    errors:
+    - shipmentMissing
+  getShipmentScan:
+    rest: api#/paths/~1shipments~1{shipmentId}~1scans~1{scanId}/get
+    subject: Shipment
+    parameters:
+      shipmentId: id
+      scanId: scans.id
+    output: TrackingScan
+  listSavedSearches:
+    rest: api#/paths/~1saved-searches/get
+    output: list<SavedSearch>
+    maxItems: 50
+    principals:
+    - user
+  createSavedSearch:
+    rest: api#/paths/~1saved-searches/post
+    lifecycle: create
+    input: CreateSavedSearch
+    output: SavedSearch
+    principals:
+    - user
+  deleteSavedSearch:
+    rest: api#/paths/~1saved-searches~1{savedSearchId}/delete
+    parameters:
+      savedSearchId: id
+    lifecycle: delete
+    subject: SavedSearch
+    principals:
+    - user
+  getWarehouse:
+    rest: api#/paths/~1warehouses~1{warehouseId}/get
+    parameters:
+      warehouseId: id
+    output: Warehouse
+  suggestWarehouses:
+    rest: api#/paths/~1warehouses~1suggestions/get
+    parameters:
+      q: name
+    output: list<Warehouse>
+    maxItems: 10
+    handler: authored
+  getShipmentLines:
+    rest: api#/paths/~1shipments~1{shipmentId}~1lines/get
+    subject: Shipment
+    parameters:
+      shipmentId: id
+    output: list<ShipmentLine>
+    maxItems: 100
+  removeShipmentLine:
+    rest: api#/paths/~1shipments~1{shipmentId}~1lines~1{lineId}/delete
+    subject: Shipment
+    parameters:
+      shipmentId: id
+      lineId: lines.id
+    handler: authored

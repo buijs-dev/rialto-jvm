@@ -1,0 +1,54 @@
+rialto: '1.0.0'
+errors:
+  format: problem-details
+  validationStatus: 400
+  identify: member
+  wire:
+    code: /code
+    fieldErrors: /errors
+    field:
+      location: /pointer
+      code: /code
+      detail: /detail
+    locationFormat: pointer
+  codes:
+    noLines:
+      category: conflict
+      title: Shipment has no lines
+      description: Approval requires at least one shipment line.
+    blank:
+      category: validation
+      title: Must not be blank
+      description: An address component contains only whitespace.
+    shipmentMissing:
+      category: not-found
+      title: Shipment missing
+      description: The requested shipment is not visible in this tenant.
+    approvalDenied:
+      category: authorization
+      title: Approval denied
+      description: The verified user cannot approve this shipment.
+    shipmentQuota:
+      category: too-many-requests
+      title: Shipment quota reached
+      description: The tenant has reached its shipment creation quota.
+    warehouseUnavailable:
+      category: unavailable
+      title: Warehouse unavailable
+      description: The warehouse integration is temporarily unavailable.
+    invalidRecipient:
+      category: validation
+      title: Invalid recipient
+      description: The recipient cannot receive this shipment.
+      status: 422
+  types:
+    validation: https://errors.example.invalid/validation
+    authentication: https://errors.example.invalid/authentication
+    authorization: https://errors.example.invalid/authorization
+    not-found: https://errors.example.invalid/not-found
+    conflict: https://errors.example.invalid/conflict
+    precondition-failed: https://errors.example.invalid/precondition-failed
+    precondition-required: https://errors.example.invalid/precondition-required
+    too-many-requests: https://errors.example.invalid/too-many-requests
+    unavailable: https://errors.example.invalid/unavailable
+    internal: https://errors.example.invalid/internal

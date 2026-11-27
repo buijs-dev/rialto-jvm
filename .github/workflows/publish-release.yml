@@ -1,0 +1,17 @@
+name: Publish Release
+
+# A merged release pull request into main publishes the tagged version to Maven Central and creates the GitHub Release.
+on:
+  pull_request:
+    types: [ closed ]
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    uses: buijs-dev/ci-templates/.github/workflows/publish-release.yml@main
+    with:
+      root-dir: ${{ vars.ROOT_DIR || '.' }}
+    secrets: inherit

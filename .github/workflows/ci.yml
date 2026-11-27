@@ -1,0 +1,64 @@
+name: CI
+
+# Builds and tests every module with the style check, then runs the conformance runner (rialto conformance) over the
+# test contracts of the specification, with the installed command line as the tool under test. The test contracts come
+# from ../rialto-spec: the checkout of rialto-spec at the branch with the same name as this one when it exists (a slice
+# changes both), else develop.
+# The tests read the published artifact dev.buijs.rialto:rialto-spec at rialtoSpecVersion, or that checkout when it is
+# of a branch with the same name (-Prialto.spec), as the artifact does not have the changes of the slice yet.
+# The convention plugins (dev.buijs.conventions.settings, dev.buijs.kotlin-style) come from the snapshots on Repsy.
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          path: rialto-jvm
+
+      - name: Choose the rialto-spec branch
+        id: spec
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if git ls-remote --exit-code --heads https://github.com/buijs-dev/rialto-spec.git "refs/heads/$BRANCH" > /dev/null; then
+            echo "ref=$BRANCH" >> "$GITHUB_OUTPUT"
+            echo "gradle-args=-Prialto.spec=$GITHUB_WORKSPACE/rialto-spec" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=develop" >> "$GITHUB_OUTPUT"
+            echo "gradle-args=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout rialto-spec (${{ steps.spec.outputs.ref }})
+        uses: actions/checkout@v6
+        with:
+          repository: buijs-dev/rialto-spec
+          ref: ${{ steps.spec.outputs.ref }}
+          path: rialto-spec
+
+      - name: Set up Java & Gradle
+        uses: buijs-dev/ci-templates/.github/actions/setup-java@main
+        with:
+          root-dir: rialto-jvm
+
+      - name: Build and test
+        working-directory: rialto-jvm
+        run: ./gradlew check kotlinStyleCheck :rialto-cli:installDist ${{ steps.spec.outputs.gradle-args }} --stacktrace
+
+      - name: Conformance
+        env:
+          RIALTO: ${{ github.workspace }}/rialto-jvm/rialto-cli/build/install/rialto/bin/rialto
+        run: |
+          "$RIALTO" conformance --spec "$GITHUB_WORKSPACE/rialto-spec" --jobs 8 --verbose -- "$RIALTO" validate {contract}

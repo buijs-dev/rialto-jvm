@@ -1,0 +1,30 @@
+rialto: '1.0.0'
+info:
+  name: shipment
+  version: 2.0.0
+sources:
+  api:
+    kind: openapi
+    path: ../openapi.json
+    version: 2.0.0
+    status: current
+  db:
+    kind: sql
+    path: ../schema.sql
+    dialect: postgresql
+  events:
+    kind: asyncapi
+    path: ../asyncapi.json
+    version: 1.0.0
+    status: current
+  apiV1:
+    kind: openapi
+    path: ../openapi-v1.json
+    version: 1.0.0
+    status: deprecated
+    deprecated: '2026-11-01'
+    sunset: '2027-11-01'
+    successor: api
+include:
+- contract/*.rialto.yaml
+- contract/shipment/*.rialto.yaml
