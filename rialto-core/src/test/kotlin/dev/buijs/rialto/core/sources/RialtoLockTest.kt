@@ -371,11 +371,11 @@ class RialtoLockTest {
         // expect
         assertThat(exclusive(file) { exclusive(work.resolve("other.lock")) { "ran" } })
             .isEqualTo("ran")
-        assertThatThrownBy { exclusive(file) { exclusive(file) { "ran" } } }
+        assertThatThrownBy { exclusive(file) { exclusive(file) { } } }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageStartingWith("This thread already holds the lock of")
 
-        // and the lock is free again afterwards
+        // and the lock is free again afterward
         assertThat(exclusive(file) { "ran" }).isEqualTo("ran")
     }
 
@@ -393,7 +393,7 @@ class RialtoLockTest {
         assertThat(file.isSymbolicLink()).isTrue()
         assertThat(RialtoLock(target, CONTRACT).read().sources).containsExactlyEntriesOf(mapOf("https://a" to B))
         assertThat(work.resolve("shared").listDirectoryEntries()).containsExactly(target)
-        assertThatThrownBy { exclusive(file) { exclusive(target) { "ran" } } }
+        assertThatThrownBy { exclusive(file) { exclusive(target) { } } }
             .isInstanceOf(IllegalStateException::class.java)
     }
 
